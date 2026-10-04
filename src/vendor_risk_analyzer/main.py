@@ -14,6 +14,9 @@ app = FastAPI(
     title="Vendor Risk Analyzer",
     description="AI-powered vendor risk assessment platform",
     version="0.1.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 app.include_router(health_router)
