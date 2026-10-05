@@ -1,3 +1,4 @@
+from collections import defaultdict
 from dataclasses import (
     dataclass,
     field,
@@ -11,30 +12,129 @@ from vendor_risk_analyzer.ingestion.parsers.base import (
 
 
 # ==============================================================
-# RETRIEVAL-EXCLUDED NAVIGATION SECTIONS
+# NAVIGATION DETECTION
 #
-# We still preserve these sections in document_elements.
+# IMPORTANT:
 #
-# We simply do not create retrieval chunks from their content.
+# We intentionally keep this list small.
 #
-# This prevents queries such as:
+# We DO NOT put things such as:
 #
-#   "What encryption controls does the vendor provide?"
+#   Preface
+#   Foreword
+#   Appendix
+#   Glossary
+#   References
+#   Executive Summary
+#   Notices
+#   Compliance
+#   Security Addendum
+#   Privacy Addendum
 #
-# from retrieving:
+# here because those sections can contain important vendor-risk
+# evidence.
 #
-#   Data Encryption ............ 5
-#
-# from a Table of Contents instead of the real substantive
-# section.
+# These are only very strong navigation hints.
 # ==============================================================
 
-NAVIGATION_SECTION_TITLES = {
+STRONG_NAVIGATION_TITLES = {
     "table of contents",
     "contents",
     "list of figures",
     "list of tables",
+    "list of illustrations",
+    "index",
+    "document index",
+    "section index",
 }
+
+
+# ==============================================================
+# NAVIGATION CONTENT PATTERNS
+# ==============================================================
+
+
+# Examples:
+#
+# Security Controls ........................ 12
+# Appendix A ............................... 24
+# Preface .................................. iv
+#
+DOT_LEADER_PAGE_REFERENCE_PATTERN = re.compile(
+    r"\.{3,}"
+    r"\s*"
+    r"(?:\d+|[ivxlcdm]+)"
+    r"\b",
+    re.IGNORECASE,
+)
+
+
+# Examples:
+#
+# 1 Introduction 3
+# 2 Security Architecture 5
+# 2.1 Encryption 7
+#
+# This is intentionally conservative and is only trusted when
+# several similar entries occur in the same section/page.
+#
+NUMBERED_PAGE_REFERENCE_PATTERN = re.compile(
+    r"^"
+    r"\d+"
+    r"(?:\.\d+)*"
+    r"\.?"
+    r"\s+"
+    r".{1,150}?"
+    r"\s+"
+    r"(?:\d+|[ivxlcdm]+)"
+    r"$",
+    re.IGNORECASE,
+)
+
+
+# Examples:
+#
+# Figure 1. Architecture 6
+# Fig. 2. Data Flow 9
+# Table 3. Subprocessors 17
+#
+FIGURE_TABLE_PAGE_REFERENCE_PATTERN = re.compile(
+    r"^"
+    r"(?:fig(?:ure)?\.?|table)"
+    r"\s+"
+    r"[A-Za-z]?\d+"
+    r"(?:[.:\-–—])?"
+    r"\s+"
+    r".{1,150}?"
+    r"\s+"
+    r"(?:\d+|[ivxlcdm]+)"
+    r"$",
+    re.IGNORECASE,
+)
+
+
+# Generic short title followed by a page number.
+#
+# Example:
+#
+# Security Architecture 8
+#
+# This is weak evidence and is NEVER enough by itself.
+#
+SHORT_TITLE_PAGE_REFERENCE_PATTERN = re.compile(
+    r"^"
+    r"[A-Za-z]"
+    r".{1,120}?"
+    r"\s+"
+    r"(?:\d+|[ivxlcdm]+)"
+    r"$",
+    re.IGNORECASE,
+)
+
+
+# ==============================================================
+# CHUNK MODEL
+# ==============================================================
 
 
 @dataclass(slots=True)
@@ -55,6 +155,7 @@ class ParsedChunk:
 # ==============================================================
 # MAIN CHUNKING FUNCTION
 # ==============================================================
+
 
 def create_chunks(
     elements: list[ParsedElement],
@@ -78,13 +179,33 @@ def create_chunks(
             "long_text_overlap_chars cannot be negative"
         )
 
+    # ==========================================================
+    # FIRST:
+    #
+    # Analyze the full document before chunking it.
+    #
+    # We need document-level / section-level context to decide
+    # whether content is navigation.
+    #
+    # A single line such as:
+    #
+    #   Security Architecture 8
+    #
+    # is NOT enough to discard content.
+    #
+    # But 10 similar page-reference lines in the same section
+    # strongly indicate navigation.
+    # ==========================================================
+
+    navigation_exclusions = (
+        _detect_navigation_elements(
+            elements
+        )
+    )
+
     chunks: list[
         ParsedChunk
     ] = []
-
-    # ==========================================================
-    # CURRENT NORMAL TEXT CHUNK
-    # ==========================================================
 
     current_parts: list[
         str
@@ -103,7 +224,7 @@ def create_chunks(
     ] = []
 
     # ==========================================================
-    # SAVE CURRENT NORMAL TEXT CHUNK
+    # SAVE CURRENT TEXT CHUNK
     # ==========================================================
 
     def save_text_chunk() -> None:
@@ -155,7 +276,7 @@ def create_chunks(
         )
 
     # ==========================================================
-    # CLEAR CURRENT TEXT STATE
+    # CLEAR CURRENT CHUNK
     # ==========================================================
 
     def clear_current() -> None:
@@ -178,10 +299,8 @@ def create_chunks(
         # ======================================================
         # HEADING
         #
-        # Headings are used as retrieval metadata/context.
-        #
-        # We do not create standalone chunks containing only
-        # headings.
+        # Headings do not create standalone retrieval chunks.
+        # They provide structural context.
         # ======================================================
 
         if (
@@ -189,15 +308,9 @@ def create_chunks(
             == "heading"
         ):
 
-            # Finish text belonging to the previous section.
             save_text_chunk()
             clear_current()
 
-            # Keep current hierarchy even if this heading belongs
-            # to a navigation section.
-            #
-            # That way following TOC paragraphs are recognized
-            # as navigation content and skipped.
             current_heading_path[:] = (
                 element.heading_path
             )
@@ -207,26 +320,16 @@ def create_chunks(
         # ======================================================
         # NAVIGATION CONTENT
         #
-        # Examples:
+        # Keep it in document_elements.
         #
-        # Table of Contents
-        # Contents
-        # List of Figures
-        # List of Tables
-        #
-        # IMPORTANT:
-        #
-        # The elements remain stored in document_elements.
-        #
-        # We only prevent them from becoming retrieval chunks.
+        # Do NOT put it in document_chunks.
         # ======================================================
 
-        if _is_navigation_element(
-            element
+        if (
+            sequence
+            in navigation_exclusions
         ):
 
-            # A navigation block must never accidentally combine
-            # with substantive content accumulated before it.
             save_text_chunk()
             clear_current()
 
@@ -241,13 +344,10 @@ def create_chunks(
         # ======================================================
         # CAPTION
         #
-        # Captions remain preserved in document_elements.
+        # Figure captions remain available in document_elements.
         #
-        # Figure captions are not currently embedded by
-        # themselves.
-        #
-        # Table captions are copied into table metadata by the
-        # parser and prepended to the corresponding table chunk.
+        # Table captions are already attached to table metadata
+        # by the PDF parser.
         # ======================================================
 
         if (
@@ -262,13 +362,8 @@ def create_chunks(
         #
         # Tables remain semantic units.
         #
-        # We intentionally do NOT force tables through the
-        # 1200-character ordinary-text limit because arbitrary
-        # splitting may destroy row/column relationships.
-        #
-        # Later, before embeddings, we can add semantic row-group
-        # table splitting if real retrieval evaluation proves it
-        # necessary.
+        # Do not arbitrarily split them at max_chars because that
+        # can destroy row/column relationships.
         # ======================================================
 
         if (
@@ -288,23 +383,6 @@ def create_chunks(
                 current_heading_path.copy()
             )
 
-            # --------------------------------------------------
-            # Additional safety:
-            #
-            # Do not create table retrieval chunks if a table is
-            # inside navigation material.
-            # --------------------------------------------------
-
-            if _is_navigation_heading_path(
-                table_heading_path
-            ):
-
-                current_heading_path[:] = (
-                    table_heading_path
-                )
-
-                continue
-
             caption = (
                 element.metadata.get(
                     "caption"
@@ -315,14 +393,6 @@ def create_chunks(
                 element.content.strip()
             )
 
-            # Include a real table caption in the retrieval text.
-            #
-            # Example:
-            #
-            # Table 1. CSF 2.0 Core Function...
-            #
-            # | Function | Category | ...
-            #
             if caption:
 
                 normalized_caption = (
@@ -378,10 +448,6 @@ def create_chunks(
 
         # ======================================================
         # NORMAL TEXT-LIKE ELEMENT
-        #
-        # paragraph
-        # list_item
-        # etc.
         # ======================================================
 
         text = (
@@ -393,40 +459,14 @@ def create_chunks(
         if not text:
             continue
 
-        # Use the element's own hierarchy when available.
         if element.heading_path:
 
             current_heading_path[:] = (
                 element.heading_path
             )
 
-        # ------------------------------------------------------
-        # Extra navigation guard.
-        #
-        # This also handles any future parser element type that
-        # falls inside a navigation section.
-        # ------------------------------------------------------
-
-        if _is_navigation_heading_path(
-            current_heading_path
-        ):
-
-            save_text_chunk()
-            clear_current()
-
-            continue
-
         # ======================================================
         # SINGLE SOURCE ELEMENT > max_chars
-        #
-        # Example:
-        #
-        # AWS Table of Contents previously contained a single
-        # 1600+ character source element.
-        #
-        # Although TOCs are now excluded, this logic is still
-        # necessary for legitimate oversized paragraphs in
-        # arbitrary vendor documents.
         # ======================================================
 
         if (
@@ -436,7 +476,6 @@ def create_chunks(
             > max_chars
         ):
 
-            # Save any previous normal chunk first.
             save_text_chunk()
             clear_current()
 
@@ -483,9 +522,6 @@ def create_chunks(
                             "element_type":
                                 "text",
 
-                            # Element overlap is not used because
-                            # this chunk came from one source
-                            # element.
                             "overlap_elements":
                                 0,
 
@@ -531,7 +567,6 @@ def create_chunks(
             )
         )
 
-        # Adding this element would exceed max_chars.
         if (
             current_parts
 
@@ -542,24 +577,10 @@ def create_chunks(
             > max_chars
         ):
 
-            # Store the current chunk.
             save_text_chunk()
 
             # --------------------------------------------------
             # Preserve element-level overlap.
-            #
-            # Example:
-            #
-            # Chunk A:
-            #   P1
-            #   P2
-            #   P3
-            #
-            # Chunk B:
-            #   P3
-            #   P4
-            #
-            # if overlap_elements = 1.
             # --------------------------------------------------
 
             overlap_parts = (
@@ -599,8 +620,6 @@ def create_chunks(
                 )
             )
 
-            # Only keep the overlap if the overlap plus new text
-            # itself still fits.
             if (
                 overlap_parts
 
@@ -627,7 +646,6 @@ def create_chunks(
 
                 clear_current()
 
-        # Add the new element.
         current_parts.append(
             text
         )
@@ -641,7 +659,7 @@ def create_chunks(
         )
 
     # ==========================================================
-    # SAVE FINAL TEXT CHUNK
+    # SAVE FINAL CHUNK
     # ==========================================================
 
     save_text_chunk()
@@ -650,106 +668,716 @@ def create_chunks(
 
 
 # ==============================================================
-# NAVIGATION SECTION DETECTION
+# NAVIGATION ANALYSIS
 # ==============================================================
 
-def _is_navigation_element(
-    element: ParsedElement,
-) -> bool:
+
+def _detect_navigation_elements(
+    elements: list[ParsedElement],
+) -> dict[int, str]:
     """
-    Return True when an element belongs to navigation-only
-    document content.
+    Analyze the entire document and return:
 
-    We check both:
+        {
+            element_sequence:
+                reason_for_retrieval_exclusion
+        }
 
-    - heading_path
-    - section_title
+    This is deliberately section-aware.
 
-    because different parsers may populate structure slightly
-    differently.
-
-    The original element is NEVER deleted. This function only
-    controls whether it becomes retrieval content.
+    We do NOT decide that content is navigation only because its
+    heading contains words such as "Appendix" or "Preface".
     """
 
-    if _is_navigation_heading_path(
-        element.heading_path
+    grouped_elements: dict[
+        tuple[str, ...],
+        list[
+            tuple[
+                int,
+                ParsedElement,
+            ]
+        ],
+    ] = defaultdict(
+        list
+    )
+
+    # ==========================================================
+    # GROUP ELEMENTS BY STRUCTURAL CONTEXT
+    # ==========================================================
+
+    for (
+        sequence,
+        element,
+    ) in enumerate(
+        elements
     ):
-        return True
+
+        context_key = (
+            _navigation_context_key(
+                element
+            )
+        )
+
+        grouped_elements[
+            context_key
+        ].append(
+            (
+                sequence,
+                element,
+            )
+        )
+
+    exclusions: dict[
+        int,
+        str
+    ] = {}
+
+    # ==========================================================
+    # CLASSIFY EACH STRUCTURAL GROUP
+    # ==========================================================
+
+    for (
+        context_key,
+        members,
+    ) in grouped_elements.items():
+
+        reason = (
+            _classify_navigation_group(
+                context_key=
+                    context_key,
+
+                members=
+                    members,
+            )
+        )
+
+        if reason is None:
+            continue
+
+        for (
+            sequence,
+            element,
+        ) in members:
+
+            # Headings never become retrieval chunks anyway.
+            if (
+                element.element_type
+                == "heading"
+            ):
+                continue
+
+            exclusions[
+                sequence
+            ] = reason
+
+    return exclusions
+
+
+# ==============================================================
+# NAVIGATION CONTEXT KEY
+# ==============================================================
+
+
+def _navigation_context_key(
+    element: ParsedElement,
+) -> tuple[str, ...]:
+    """
+    Create a grouping key.
+
+    Best case:
+        heading hierarchy.
+
+    Fallback:
+        section title.
+
+    If there is no structural information, use page scope so
+    that one navigation-heavy page does not cause unrelated
+    unheaded pages to be excluded.
+    """
+
+    if element.heading_path:
+
+        return (
+            "heading_path",
+            *[
+                _normalize_section_title(
+                    heading
+                )
+
+                for heading
+                in element.heading_path
+
+                if heading
+            ],
+        )
 
     if element.section_title:
 
-        normalized_section = (
+        return (
+            "section",
             _normalize_section_title(
                 element.section_title
+            ),
+        )
+
+    if (
+        element.page_number
+        is not None
+    ):
+
+        return (
+            "page",
+            str(
+                element.page_number
+            ),
+        )
+
+    # TXT and other documents may have neither page nor
+    # structural hierarchy.
+    return (
+        "unscoped",
+    )
+
+
+# ==============================================================
+# CLASSIFY ONE STRUCTURAL GROUP
+# ==============================================================
+
+
+def _classify_navigation_group(
+    *,
+    context_key: tuple[str, ...],
+    members: list[
+        tuple[
+            int,
+            ParsedElement,
+        ]
+    ],
+) -> str | None:
+
+    # ==========================================================
+    # SIGNAL 1:
+    # Strong structural heading
+    # ==========================================================
+
+    structural_titles: list[
+        str
+    ] = []
+
+    for (
+        _,
+        element,
+    ) in members:
+
+        for heading in (
+            element.heading_path
+        ):
+
+            normalized = (
+                _normalize_section_title(
+                    heading
+                )
+            )
+
+            if normalized:
+
+                structural_titles.append(
+                    normalized
+                )
+
+        if element.section_title:
+
+            normalized = (
+                _normalize_section_title(
+                    element.section_title
+                )
+            )
+
+            if normalized:
+
+                structural_titles.append(
+                    normalized
+                )
+
+    if any(
+        _is_strong_navigation_title(
+            title
+        )
+
+        for title
+        in structural_titles
+    ):
+
+        return (
+            "strong_navigation_heading"
+        )
+
+    # ==========================================================
+    # SIGNAL 2:
+    # Content-pattern density
+    # ==========================================================
+
+    content_members: list[
+        ParsedElement
+    ] = [
+        element
+
+        for (
+            _,
+            element,
+        ) in members
+
+        if (
+            element.element_type
+            != "heading"
+
+            and
+            element.content.strip()
+        )
+    ]
+
+    if not content_members:
+        return None
+
+    evidence_scores = [
+        _navigation_evidence_score(
+            element.content
+        )
+
+        for element
+        in content_members
+    ]
+
+    strong_evidence_count = sum(
+        1
+
+        for score
+        in evidence_scores
+
+        if score >= 0.85
+    )
+
+    medium_evidence_count = sum(
+        1
+
+        for score
+        in evidence_scores
+
+        if score >= 0.60
+    )
+
+    average_score = (
+        sum(
+            evidence_scores
+        )
+        /
+        len(
+            evidence_scores
+        )
+    )
+
+    # ==========================================================
+    # CASE A:
+    #
+    # One PDF block may contain an entire TOC.
+    #
+    # Example:
+    #
+    # Security ............ 4
+    # Compliance .......... 8
+    # Appendix ............ 13
+    #
+    # PyMuPDF may expose that as one element.
+    # ==========================================================
+
+    if (
+        len(
+            content_members
+        )
+        == 1
+    ):
+
+        only_text = (
+            content_members[
+                0
+            ]
+            .content
+        )
+
+        repeated_references = (
+            _count_navigation_references(
+                only_text
             )
         )
 
         if (
-            normalized_section
-            in NAVIGATION_SECTION_TITLES
+            evidence_scores[
+                0
+            ]
+            >= 0.90
+
+            and
+            repeated_references
+            >= 3
         ):
-            return True
 
-    return False
+            return (
+                "navigation_reference_block"
+            )
+
+        return None
+
+    # ==========================================================
+    # CASE B:
+    #
+    # Multiple strongly navigation-looking elements.
+    #
+    # Require density rather than one accidental match.
+    # ==========================================================
+
+    if (
+        len(
+            content_members
+        )
+        >= 3
+
+        and
+        strong_evidence_count
+        >= 2
+
+        and
+        average_score
+        >= 0.55
+    ):
+
+        return (
+            "navigation_pattern_density"
+        )
+
+    # ==========================================================
+    # CASE C:
+    #
+    # Larger groups can contain a few odd elements.
+    #
+    # If 70% or more look navigation-like, classify the group.
+    # ==========================================================
+
+    if (
+        len(
+            content_members
+        )
+        >= 5
+    ):
+
+        density = (
+            medium_evidence_count
+            /
+            len(
+                content_members
+            )
+        )
+
+        if density >= 0.70:
+
+            return (
+                "navigation_pattern_density"
+            )
+
+    return None
 
 
-def _is_navigation_heading_path(
-    heading_path: list[str],
+# ==============================================================
+# STRONG NAVIGATION TITLE
+# ==============================================================
+
+
+def _is_strong_navigation_title(
+    title: str,
 ) -> bool:
+
+    title = (
+        _normalize_section_title(
+            title
+        )
+    )
+
+    if (
+        title
+        in
+        STRONG_NAVIGATION_TITLES
+    ):
+
+        return True
+
+    # ----------------------------------------------------------
+    # Also support:
+    #
+    # "Contents — Security Manual"
+    # "Table of Contents - Policy"
+    #
+    # without treating something such as:
+    #
+    # "Contents of Encryption Keys"
+    #
+    # as navigation.
+    # ----------------------------------------------------------
+
+    for navigation_title in (
+        STRONG_NAVIGATION_TITLES
+    ):
+
+        if (
+            title.startswith(
+                navigation_title
+                + " - "
+            )
+
+            or
+
+            title.startswith(
+                navigation_title
+                + " — "
+            )
+
+            or
+
+            title.startswith(
+                navigation_title
+                + ": "
+            )
+        ):
+
+            return True
+
+    return False
+
+
+# ==============================================================
+# NAVIGATION EVIDENCE SCORE
+# ==============================================================
+
+
+def _navigation_evidence_score(
+    text: str,
+) -> float:
     """
-    Check every level in a heading hierarchy.
+    Return a score from 0.0 to 1.0.
 
-    Examples:
+    1.0:
+        very strong navigation evidence.
 
-        ["Table of Contents"]
+    0.0:
+        no navigation evidence.
 
-        [
-            "Framework (CSF) 2.0",
-            "Table of Contents",
-        ]
+    This function intentionally favors false negatives over
+    false positives.
 
-        [
-            "Framework (CSF) 2.0",
-            "List of Figures",
-        ]
-
-    All should be excluded from retrieval.
+    It is better to embed one unnecessary TOC line than to
+    remove important security evidence.
     """
 
-    for heading in heading_path:
+    normalized = (
+        _normalize_content_text(
+            text
+        )
+    )
 
-        normalized_heading = (
-            _normalize_section_title(
-                heading
+    if not normalized:
+        return 0.0
+
+    # ==========================================================
+    # DOT-LEADER REFERENCES
+    #
+    # Very strong evidence.
+    # ==========================================================
+
+    dot_reference_count = len(
+        DOT_LEADER_PAGE_REFERENCE_PATTERN
+        .findall(
+            normalized
+        )
+    )
+
+    if (
+        dot_reference_count
+        >= 2
+    ):
+
+        return 1.0
+
+    if (
+        dot_reference_count
+        == 1
+    ):
+
+        return 0.95
+
+    # ==========================================================
+    # FIGURE/TABLE INDEX ENTRY
+    # ==========================================================
+
+    if (
+        FIGURE_TABLE_PAGE_REFERENCE_PATTERN
+        .fullmatch(
+            normalized
+        )
+    ):
+
+        return 0.95
+
+    # ==========================================================
+    # NUMBERED TOC ENTRY
+    #
+    # Example:
+    #
+    # 2.1 Security Controls 8
+    # ==========================================================
+
+    if (
+        len(
+            normalized
+        )
+        <= 180
+
+        and
+        NUMBERED_PAGE_REFERENCE_PATTERN
+        .fullmatch(
+            normalized
+        )
+    ):
+
+        return 0.85
+
+    # ==========================================================
+    # GENERIC SHORT TITLE + PAGE NUMBER
+    #
+    # Weak evidence.
+    #
+    # This will only trigger navigation classification when many
+    # sibling elements look similar.
+    # ==========================================================
+
+    word_count = len(
+        normalized.split()
+    )
+
+    if (
+        len(
+            normalized
+        )
+        <= 120
+
+        and
+        word_count
+        <= 14
+
+        and
+        SHORT_TITLE_PAGE_REFERENCE_PATTERN
+        .fullmatch(
+            normalized
+        )
+
+        and
+        not normalized.endswith(
+            (
+                ".",
+                "?",
+                "!",
+                ";",
+            )
+        )
+    ):
+
+        return 0.60
+
+    return 0.0
+
+
+# ==============================================================
+# COUNT NAVIGATION REFERENCES
+# ==============================================================
+
+
+def _count_navigation_references(
+    text: str,
+) -> int:
+    """
+    Count strong page-reference patterns inside a block.
+
+    Useful when an entire TOC has been extracted as one PDF
+    element.
+    """
+
+    normalized = (
+        _normalize_content_text(
+            text
+        )
+    )
+
+    if not normalized:
+        return 0
+
+    dot_references = len(
+        DOT_LEADER_PAGE_REFERENCE_PATTERN
+        .findall(
+            normalized
+        )
+    )
+
+    if dot_references:
+        return dot_references
+
+    # ----------------------------------------------------------
+    # If line structure survived parsing, evaluate individual
+    # lines too.
+    # ----------------------------------------------------------
+
+    lines = [
+        line.strip()
+
+        for line
+        in text.splitlines()
+
+        if line.strip()
+    ]
+
+    count = 0
+
+    for line in lines:
+
+        normalized_line = (
+            _normalize_content_text(
+                line
             )
         )
 
         if (
-            normalized_heading
-            in NAVIGATION_SECTION_TITLES
-        ):
-            return True
+            NUMBERED_PAGE_REFERENCE_PATTERN
+            .fullmatch(
+                normalized_line
+            )
 
-    return False
+            or
+
+            FIGURE_TABLE_PAGE_REFERENCE_PATTERN
+            .fullmatch(
+                normalized_line
+            )
+        ):
+
+            count += 1
+
+    return count
+
+
+# ==============================================================
+# SECTION TITLE NORMALIZATION
+# ==============================================================
 
 
 def _normalize_section_title(
     value: str,
 ) -> str:
-    """
-    Normalize structural labels for reliable comparison.
-
-    Examples:
-
-        " Table   of Contents "
-            ->
-        "table of contents"
-
-        "LIST OF FIGURES"
-            ->
-        "list of figures"
-    """
 
     value = (
         str(
@@ -765,16 +1393,6 @@ def _normalize_section_title(
         value,
     )
 
-    # Remove simple trailing punctuation only.
-    #
-    # This allows:
-    #
-    #   Table of Contents:
-    #
-    # to match:
-    #
-    #   table of contents
-    #
     value = value.rstrip(
         " :.-–—"
     )
@@ -783,8 +1401,41 @@ def _normalize_section_title(
 
 
 # ==============================================================
+# CONTENT NORMALIZATION
+# ==============================================================
+
+
+def _normalize_content_text(
+    value: str,
+) -> str:
+
+    value = (
+        str(
+            value
+        )
+        .replace(
+            "\r",
+            " ",
+        )
+        .replace(
+            "\n",
+            " ",
+        )
+    )
+
+    value = re.sub(
+        r"\s+",
+        " ",
+        value,
+    )
+
+    return value.strip()
+
+
+# ==============================================================
 # SPLIT ONE OVERSIZED TEXT ELEMENT
 # ==============================================================
+
 
 def _split_long_text(
     text: str,
@@ -793,20 +1444,20 @@ def _split_long_text(
     overlap_chars: int,
 ) -> list[str]:
     """
-    Split a single source element that is larger than max_chars.
+    Split one oversized source element while attempting to
+    preserve natural boundaries.
 
-    Preference order for split boundaries:
+    Preferred boundaries:
 
-    - paragraph boundary
-    - newline
-    - sentence ending
-    - semicolon
-    - comma
-    - whitespace
-    - hard character boundary
+        paragraph
+        newline
+        sentence
+        semicolon
+        comma
+        whitespace
+        hard character boundary
 
-    A small character overlap is preserved between adjacent
-    pieces.
+    Adjacent pieces preserve a small character overlap.
     """
 
     text = (
@@ -822,7 +1473,6 @@ def _split_long_text(
             "max_chars must be greater than 0"
         )
 
-    # Keep overlap within a safe fraction of the chunk.
     overlap_chars = max(
         0,
         min(
@@ -837,6 +1487,7 @@ def _split_long_text(
         )
         <= max_chars
     ):
+
         return [
             text
         ]
@@ -847,9 +1498,6 @@ def _split_long_text(
 
     start = 0
 
-    # We do not want to split extremely early in each window.
-    #
-    # Prefer a boundary in the final 40%.
     minimum_break_distance = max(
         1,
         int(
@@ -874,7 +1522,10 @@ def _split_long_text(
             ),
         )
 
-        # Last piece.
+        # ------------------------------------------------------
+        # LAST PIECE
+        # ------------------------------------------------------
+
         if (
             hard_end
             >= len(
@@ -900,11 +1551,7 @@ def _split_long_text(
             ] = []
 
             # --------------------------------------------------
-            # Look for a natural boundary.
-            #
-            # We gather available candidates and select the
-            # latest safe boundary so the chunk remains close
-            # to max_chars.
+            # Search for natural boundaries.
             # --------------------------------------------------
 
             for separator in (
@@ -957,9 +1604,7 @@ def _split_long_text(
 
         if piece:
 
-            # Final defensive guarantee.
-            #
-            # This should normally already be <= max_chars.
+            # Defensive guarantee.
             if (
                 len(
                     piece
@@ -973,7 +1618,6 @@ def _split_long_text(
 
             else:
 
-                # Extremely defensive fallback.
                 pieces.append(
                     piece[
                         :max_chars
@@ -990,17 +1634,18 @@ def _split_long_text(
 
             break
 
-        # ------------------------------------------------------
+        # ======================================================
         # CHARACTER OVERLAP
-        # ------------------------------------------------------
+        # ======================================================
 
         next_start = max(
             start + 1,
+
             end
             - overlap_chars,
         )
 
-        # Try not to start inside a word.
+        # Avoid beginning in the middle of a word.
         while (
             next_start
             < end
@@ -1013,7 +1658,7 @@ def _split_long_text(
 
             next_start += 1
 
-        # Skip whitespace before the new piece.
+        # Remove whitespace at the start of the next chunk.
         while (
             next_start
             < len(
