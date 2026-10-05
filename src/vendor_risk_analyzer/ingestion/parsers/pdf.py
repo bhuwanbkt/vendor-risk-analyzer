@@ -17,27 +17,60 @@ PAGE_NUMBER_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+
+# ==============================================================
+# CAPTIONS
+#
+# Require punctuation after the figure/table number.
+#
+# Matches:
+#   Fig. 1. CSF Core structure
+#   Figure 1: AWS Shared Security Responsibility Model
+#   Table 1. CSF 2.0 Core ...
+#
+# Does NOT match:
+#   Figure 2 shows the CSF Functions ...
+#   Table 2 contains a notional illustration ...
+# ==============================================================
+
 TABLE_CAPTION_PATTERN = re.compile(
-    r"^table\s+[A-Za-z]?\d+(?:[.\-:])?\b",
+    r"^table\s+"
+    r"[A-Za-z]?\d+"
+    r"\s*"
+    r"[.:\-–—]"
+    r"\s+"
+    r"\S",
     re.IGNORECASE,
 )
 
 FIGURE_CAPTION_PATTERN = re.compile(
-    r"^(?:fig(?:ure)?\.?)\s+[A-Za-z]?\d+(?:[.\-:])?\b",
+    r"^(?:fig(?:ure)?\.?)\s+"
+    r"[A-Za-z]?\d+"
+    r"\s*"
+    r"[.:\-–—]"
+    r"\s+"
+    r"\S",
     re.IGNORECASE,
 )
 
+
+# ==============================================================
+# CONTROL ITEMS
+#
 # Examples:
 #
-# ID.AM-01:
-# GV.OC-01:
-# o ID.AM-01:
+#   ID.AM-01:
+#   GV.OC-01:
+#   o ID.AM-01:
 #
-# These are control/subcategory items, not section headings.
+# These are content/subcategory items, not document headings.
+# ==============================================================
+
 CONTROL_ITEM_PATTERN = re.compile(
     r"^(?:[oO]\s+)?"
     r"[A-Z]{2,6}\.[A-Z]{2,6}-\d{2}\s*:"
 )
+
 
 BULLET_PATTERN = re.compile(
     r"^[•●▪◦‣]\s*"
@@ -47,7 +80,11 @@ BULLET_PATTERN = re.compile(
 class PDFParser(BaseParser):
     supported_extensions = {"pdf"}
 
-    parser_version = "1.5"
+    parser_version = "1.6"
+
+    # ==========================================================
+    # MAIN PARSER
+    # ==========================================================
 
     def parse(
         self,
@@ -63,8 +100,8 @@ class PDFParser(BaseParser):
             # ==================================================
             # PDF BOOKMARK / OUTLINE INFORMATION
             #
-            # If the PDF contains a real outline, it is stronger
-            # heading evidence than font-size guessing.
+            # If the PDF contains bookmarks, they are stronger
+            # evidence of real headings than font-size alone.
             # ==================================================
 
             toc_levels = (
@@ -80,7 +117,7 @@ class PDFParser(BaseParser):
             #
             # Extract:
             #
-            # - normal text
+            # - text blocks
             # - font information
             # - bounding boxes
             # - tables
@@ -125,8 +162,8 @@ class PDFParser(BaseParser):
                     )
 
                 except Exception:
-                    # Text parsing must still work even if one
-                    # page has malformed table geometry.
+                    # One malformed page should not stop
+                    # text extraction for the entire document.
                     tables = []
 
                 for (
@@ -147,9 +184,6 @@ class PDFParser(BaseParser):
                         )
 
                     except Exception:
-                        # Some malformed PDF tables can expose
-                        # invalid/empty geometry. Skip the table,
-                        # not the whole document.
                         continue
 
                     if not rows:
@@ -174,7 +208,8 @@ class PDFParser(BaseParser):
                         in normalized_rows
                     )
 
-                    # Avoid false-positive one-cell layouts.
+                    # Avoid false positive "tables" that are
+                    # really just one-dimensional layouts.
                     if (
                         row_count < 2
                         or column_count < 2
@@ -269,8 +304,14 @@ class PDFParser(BaseParser):
                     # ------------------------------------------
                     # TABLE TEXT DEDUPLICATION
                     #
-                    # Text inside a detected table should not
-                    # also become ordinary paragraph content.
+                    # If most of this text block belongs to a
+                    # detected table, the table owns the text.
+                    #
+                    # Otherwise we would store:
+                    #
+                    # table element
+                    # +
+                    # duplicate paragraph element
                     # ------------------------------------------
 
                     inside_table = any(
@@ -416,24 +457,21 @@ class PDFParser(BaseParser):
                 # ==============================================
                 # APPROXIMATE READING ORDER
                 #
-                # Top-to-bottom, then left-to-right.
+                # Top-to-bottom first.
+                # Left-to-right second.
                 # ==============================================
 
                 page_blocks.sort(
                     key=lambda item: (
                         (
-                            item[
-                                "bbox"
-                            ][1]
+                            item["bbox"][1]
                             if item.get(
                                 "bbox"
                             )
                             else 0
                         ),
                         (
-                            item[
-                                "bbox"
-                            ][0]
+                            item["bbox"][0]
                             if item.get(
                                 "bbox"
                             )
@@ -449,7 +487,7 @@ class PDFParser(BaseParser):
             # ==================================================
             # PASS 2
             #
-            # Estimate normal body font.
+            # Estimate normal document body font.
             # ==================================================
 
             body_font_size = (
@@ -461,21 +499,33 @@ class PDFParser(BaseParser):
             # ==================================================
             # PASS 3
             #
-            # Learn repeated headers / footers from the document.
+            # Detect repeated running headers and footers.
             #
-            # This fixes PDFs such as the NIST document where
-            # the running header sits slightly below our older
-            # fixed 7% cutoff.
+            # Important:
+            #
+            # This works even when the same visual header is
+            # represented by different PDF block structures.
+            #
+            # Example:
+            #
+            # Page A:
+            #
+            # [NIST CSWP 29 February 26, 2024]
+            # [The NIST Cybersecurity Framework (CSF) 2.0]
+            #
+            # Page B:
+            #
+            # [NIST CSWP 29 The NIST Cybersecurity Framework
+            #  (CSF) 2.0 February 26, 2024]
+            #
+            # Those should be considered the same header.
             # ==================================================
 
-            repeated_margin_signatures = (
-                self
-                ._find_repeated_margin_signatures(
-                    raw_blocks,
-                    page_count=len(
-                        document
-                    ),
-                )
+            self._mark_repeated_margin_noise(
+                raw_blocks,
+                page_count=len(
+                    document
+                ),
             )
 
             # ==================================================
@@ -486,7 +536,7 @@ class PDFParser(BaseParser):
             # - repeated headers
             # - repeated footers
             # - standalone page numbers
-            # - conservative small-margin noise
+            # - small obvious margin noise
             # ==================================================
 
             cleaned_blocks = [
@@ -495,17 +545,14 @@ class PDFParser(BaseParser):
                 in raw_blocks
 
                 if not self._is_noise(
-                    block,
-                    repeated_margin_signatures=(
-                        repeated_margin_signatures
-                    ),
+                    block
                 )
             ]
 
             # ==================================================
             # PASS 5
             #
-            # Convert to ParsedElements.
+            # Convert normalized blocks into ParsedElements.
             # ==================================================
 
             elements: list[
@@ -517,8 +564,17 @@ class PDFParser(BaseParser):
                 str,
             ] = {}
 
-            # A table caption usually appears immediately before
-            # a table.
+            # --------------------------------------------------
+            # TABLE CAPTION STATE
+            #
+            # Used to connect:
+            #
+            # Table 1. Caption
+            # [table]
+            #
+            # without making the caption alter heading hierarchy.
+            # --------------------------------------------------
+
             pending_table_caption: (
                 str | None
             ) = None
@@ -527,7 +583,15 @@ class PDFParser(BaseParser):
                 int | None
             ) = None
 
-            # Used for multi-page table continuation.
+            # --------------------------------------------------
+            # MULTI-PAGE TABLE STATE
+            #
+            # Allows:
+            #
+            # page 29 -> table begins
+            # page 30 -> table continues
+            # --------------------------------------------------
+
             last_table_caption: (
                 str | None
             ) = None
@@ -575,14 +639,13 @@ class PDFParser(BaseParser):
                     )
 
                     # ------------------------------------------
-                    # Same-page caption:
-                    #
-                    # Table 1. ...
-                    # [actual table]
+                    # Table caption immediately before a table
+                    # on the same page.
                     # ------------------------------------------
 
                     if (
                         pending_table_caption
+
                         and
                         pending_table_caption_page
                         ==
@@ -596,14 +659,16 @@ class PDFParser(BaseParser):
                         )
 
                     # ------------------------------------------
-                    # Multi-page continuation:
+                    # Multi-page table continuation.
                     #
-                    # Page 29 = Table 2 begins
-                    # Page 30 = table continues near page top
+                    # A table beginning near the top of the
+                    # immediately following page is considered
+                    # a continuation of the prior table.
                     # ------------------------------------------
 
                     elif (
                         last_table_caption
+
                         and
                         last_table_page
                         is not None
@@ -736,7 +801,8 @@ class PDFParser(BaseParser):
                 # ==============================================
                 # FIGURE / TABLE CAPTION
                 #
-                # Captions are NOT headings.
+                # Captions are document structure but they do
+                # NOT modify the heading hierarchy.
                 # ==============================================
 
                 caption_type = (
@@ -833,9 +899,14 @@ class PDFParser(BaseParser):
 
                     continue
 
-                # A table caption should normally be adjacent to
-                # the table. If unrelated text appears first,
-                # stop carrying the pending caption.
+                # ----------------------------------------------
+                # A pending table caption should be immediately
+                # followed by the table.
+                #
+                # If unrelated text appears first, stop carrying
+                # that caption forward.
+                # ----------------------------------------------
+
                 if (
                     pending_table_caption
 
@@ -889,6 +960,22 @@ class PDFParser(BaseParser):
                     is not None
                 ):
 
+                    # ------------------------------------------
+                    # Remove headings at the same or deeper level
+                    # before adding the new heading.
+                    #
+                    # Example:
+                    #
+                    # L1 Security Products and Features
+                    # L2 Data Encryption
+                    #
+                    # then:
+                    #
+                    # L2 Identity and Access Control
+                    #
+                    # replaces the previous L2.
+                    # ------------------------------------------
+
                     for (
                         existing_level
                     ) in list(
@@ -920,7 +1007,7 @@ class PDFParser(BaseParser):
                         )
                     ]
 
-                    # A real heading ends any previous table
+                    # A real heading ends previous table
                     # continuation context.
                     last_table_caption = (
                         None
@@ -1046,7 +1133,9 @@ class PDFParser(BaseParser):
         ] = {}
 
         try:
-            toc = document.get_toc()
+            toc = (
+                document.get_toc()
+            )
 
         except Exception:
             return result
@@ -1065,13 +1154,18 @@ class PDFParser(BaseParser):
                     page_number,
                     int,
                 )
-                or page_number <= 0
+
+                or
+
+                page_number <= 0
             ):
                 continue
 
             title_key = (
                 self._normalize_match_text(
-                    str(title)
+                    str(
+                        title
+                    )
                 )
             )
 
@@ -1081,7 +1175,9 @@ class PDFParser(BaseParser):
             level = max(
                 1,
                 min(
-                    int(level),
+                    int(
+                        level
+                    ),
                     3,
                 ),
             )
@@ -1091,7 +1187,9 @@ class PDFParser(BaseParser):
                 title_key,
             )
 
-            result[key] = min(
+            result[
+                key
+            ] = min(
                 result.get(
                     key,
                     level,
@@ -1129,7 +1227,9 @@ class PDFParser(BaseParser):
                 continue
 
             sizes = [
-                float(size)
+                float(
+                    size
+                )
 
                 for size
                 in block.get(
@@ -1174,10 +1274,20 @@ class PDFParser(BaseParser):
             ):
                 continue
 
-            _, y0, _, y1 = bbox
+            _, y0, _, y1 = (
+                bbox
+            )
 
-            # Prefer central body paragraphs and avoid page
-            # margins/title areas when estimating body font.
+            # Prefer text safely inside the body region.
+            #
+            # This avoids using:
+            #
+            # - running headers
+            # - footers
+            # - title-page text
+            # - very small notes
+            #
+            # when estimating normal paragraph font size.
             if (
                 y0
                 >=
@@ -1205,6 +1315,7 @@ class PDFParser(BaseParser):
                 )
 
         if central_sizes:
+
             return float(
                 median(
                     central_sizes
@@ -1212,6 +1323,7 @@ class PDFParser(BaseParser):
             )
 
         if fallback_sizes:
+
             return float(
                 median(
                     fallback_sizes
@@ -1224,17 +1336,63 @@ class PDFParser(BaseParser):
     # REPEATED HEADER / FOOTER DETECTION
     # ==========================================================
 
-    def _find_repeated_margin_signatures(
+    def _mark_repeated_margin_noise(
         self,
         blocks: list[dict],
         *,
         page_count: int,
-    ) -> set[
-        tuple[str, str]
-    ]:
+    ) -> None:
+        """
+        Detect repeated page headers and footers.
 
-        occurrences: dict[
-            tuple[str, str],
+        Two strategies are used.
+
+        Strategy 1:
+            Repeated normalized individual blocks.
+
+        Strategy 2:
+            Whole-margin fingerprints.
+
+        Strategy 2 is important because PDF generators often
+        represent identical visual headers using different
+        internal text-block boundaries.
+
+        Example:
+
+        Page 2:
+
+            [NIST CSWP 29 February 26, 2024]
+            [The NIST Cybersecurity Framework (CSF) 2.0]
+
+        Later page:
+
+            [NIST CSWP 29 The NIST Cybersecurity Framework
+             (CSF) 2.0 February 26, 2024]
+
+        Those are visually the same running header.
+        """
+
+        # ------------------------------------------------------
+        # Collect margin blocks by:
+        #
+        # (page_number, header/footer)
+        # ------------------------------------------------------
+
+        margin_groups: dict[
+            tuple[
+                int,
+                str,
+            ],
+            list[dict],
+        ] = defaultdict(
+            list
+        )
+
+        individual_occurrences: dict[
+            tuple[
+                str,
+                str,
+            ],
             set[int],
         ] = defaultdict(
             set
@@ -1259,6 +1417,21 @@ class PDFParser(BaseParser):
             if zone is None:
                 continue
 
+            page_number = int(
+                block[
+                    "page_number"
+                ]
+            )
+
+            margin_groups[
+                (
+                    page_number,
+                    zone,
+                )
+            ].append(
+                block
+            )
+
             signature = (
                 self
                 ._normalize_margin_signature(
@@ -1269,26 +1442,35 @@ class PDFParser(BaseParser):
                 )
             )
 
-            if len(signature) < 3:
-                continue
-
-            occurrences[
-                (
-                    zone,
-                    signature,
+            if (
+                len(
+                    signature
                 )
-            ].add(
-                int(
-                    block[
-                        "page_number"
-                    ]
-                )
-            )
+                >= 3
+            ):
 
-        # Require at least three different pages.
+                individual_occurrences[
+                    (
+                        zone,
+                        signature,
+                    )
+                ].add(
+                    page_number
+                )
+
+        # ------------------------------------------------------
+        # A repeated running header/footer should occur on
+        # multiple pages.
         #
-        # For large PDFs, 5% of the document is enough to
-        # identify a repeated running header/footer.
+        # Small document:
+        #
+        #   at least 3 pages
+        #
+        # Large document:
+        #
+        #   at least 5% of pages
+        # ------------------------------------------------------
+
         minimum_pages = max(
             3,
             math.ceil(
@@ -1300,20 +1482,233 @@ class PDFParser(BaseParser):
             ),
         )
 
-        return {
+        # ======================================================
+        # STRATEGY 1
+        #
+        # Repeated individual blocks
+        # ======================================================
+
+        repeated_individual = {
             key
 
             for (
                 key,
                 pages,
             )
-            in occurrences.items()
+            in individual_occurrences.items()
 
-            if len(
-                pages
+            if (
+                len(
+                    pages
+                )
+                >=
+                minimum_pages
             )
-            >= minimum_pages
         }
+
+        for (
+            page_number,
+            zone,
+        ), group_blocks in (
+            margin_groups.items()
+        ):
+
+            for block in group_blocks:
+
+                signature = (
+                    self
+                    ._normalize_margin_signature(
+                        block.get(
+                            "text",
+                            "",
+                        )
+                    )
+                )
+
+                if (
+                    (
+                        zone,
+                        signature,
+                    )
+                    in
+                    repeated_individual
+                ):
+
+                    block[
+                        "_repeated_margin_noise"
+                    ] = True
+
+        # ======================================================
+        # STRATEGY 2
+        #
+        # Whole page-margin fingerprint.
+        #
+        # This ignores how the PDF divided the visual header
+        # into blocks.
+        # ======================================================
+
+        fingerprint_occurrences: dict[
+            tuple[
+                str,
+                tuple[str, ...],
+            ],
+            set[int],
+        ] = defaultdict(
+            set
+        )
+
+        page_zone_fingerprints: dict[
+            tuple[
+                int,
+                str,
+            ],
+            tuple[
+                str,
+                ...
+            ],
+        ] = {}
+
+        for (
+            page_number,
+            zone,
+        ), group_blocks in (
+            margin_groups.items()
+        ):
+
+            fingerprint = (
+                self._build_margin_fingerprint(
+                    group_blocks
+                )
+            )
+
+            if not fingerprint:
+                continue
+
+            page_zone_fingerprints[
+                (
+                    page_number,
+                    zone,
+                )
+            ] = fingerprint
+
+            fingerprint_occurrences[
+                (
+                    zone,
+                    fingerprint,
+                )
+            ].add(
+                page_number
+            )
+
+        repeated_fingerprints = {
+            key
+
+            for (
+                key,
+                pages,
+            )
+            in fingerprint_occurrences.items()
+
+            if (
+                len(
+                    pages
+                )
+                >=
+                minimum_pages
+            )
+        }
+
+        for (
+            page_number,
+            zone,
+        ), fingerprint in (
+            page_zone_fingerprints.items()
+        ):
+
+            if (
+                (
+                    zone,
+                    fingerprint,
+                )
+                not in
+                repeated_fingerprints
+            ):
+                continue
+
+            for block in margin_groups[
+                (
+                    page_number,
+                    zone,
+                )
+            ]:
+
+                block[
+                    "_repeated_margin_noise"
+                ] = True
+
+    # ==========================================================
+    # PAGE-MARGIN FINGERPRINT
+    # ==========================================================
+
+    def _build_margin_fingerprint(
+        self,
+        blocks: list[dict],
+    ) -> tuple[str, ...]:
+        """
+        Build an order-independent fingerprint for one
+        page-margin region.
+
+        This lets these representations match:
+
+            block A + block B
+
+        and:
+
+            one combined block A+B
+
+        because PDF internal text-block boundaries are not
+        reliable semantic boundaries.
+        """
+
+        tokens: list[
+            str
+        ] = []
+
+        for block in blocks:
+
+            text = (
+                self
+                ._normalize_margin_signature(
+                    block.get(
+                        "text",
+                        "",
+                    )
+                )
+            )
+
+            block_tokens = re.findall(
+                r"[a-z0-9]+",
+                text.casefold(),
+            )
+
+            tokens.extend(
+                block_tokens
+            )
+
+        if not tokens:
+            return ()
+
+        # Sorting makes this insensitive to left/right block
+        # ordering within the header/footer region.
+        return tuple(
+            sorted(
+                tokens
+            )
+        )
+
+    # ==========================================================
+    # MARGIN ZONE
+    # ==========================================================
 
     def _get_margin_zone(
         self,
@@ -1336,8 +1731,11 @@ class PDFParser(BaseParser):
         ):
             return None
 
-        _, y0, _, y1 = bbox
+        _, y0, _, y1 = (
+            bbox
+        )
 
+        # Top 12%.
         if (
             y1
             <=
@@ -1346,6 +1744,7 @@ class PDFParser(BaseParser):
         ):
             return "header"
 
+        # Bottom 12%.
         if (
             y0
             >=
@@ -1356,47 +1755,6 @@ class PDFParser(BaseParser):
 
         return None
 
-    def _normalize_margin_signature(
-        self,
-        text: str,
-    ) -> str:
-
-        value = (
-            self
-            ._normalize_inline_text(
-                text
-            )
-            .casefold()
-        )
-
-        # Page 3 of 25
-        value = re.sub(
-            r"\bpage\s+\d+"
-            r"\s*(?:of\s+\d+)?\b",
-
-            "page #",
-
-            value,
-        )
-
-        # Infrastructure Security 4
-        #
-        # Appendix iv
-        value = re.sub(
-            r"\s+"
-            r"(?:\d+|[ivxlcdm]+)"
-            r"\s*$",
-
-            " #",
-
-            value,
-
-            flags=
-                re.IGNORECASE,
-        )
-
-        return value.strip()
-
     # ==========================================================
     # HEADER / FOOTER / PAGE NUMBER FILTERING
     # ==========================================================
@@ -1404,13 +1762,10 @@ class PDFParser(BaseParser):
     def _is_noise(
         self,
         block: dict,
-        *,
-        repeated_margin_signatures: set[
-            tuple[str, str]
-        ],
     ) -> bool:
 
-        # Never remove tables with margin rules.
+        # Tables should never be removed by generic
+        # text-margin filtering.
         if (
             block.get(
                 "kind"
@@ -1418,6 +1773,12 @@ class PDFParser(BaseParser):
             == "table"
         ):
             return False
+
+        # Learned repeated running header/footer.
+        if block.get(
+            "_repeated_margin_noise"
+        ):
+            return True
 
         text = (
             block[
@@ -1433,11 +1794,15 @@ class PDFParser(BaseParser):
         if not bbox:
             return False
 
-        _, y0, _, y1 = bbox
+        _, y0, _, y1 = (
+            bbox
+        )
 
-        page_height = block[
-            "page_height"
-        ]
+        page_height = (
+            block[
+                "page_height"
+            ]
+        )
 
         font_sizes = block.get(
             "font_sizes",
@@ -1448,13 +1813,22 @@ class PDFParser(BaseParser):
             max(
                 font_sizes
             )
+
             if font_sizes
+
             else 0.0
         )
 
-        # ------------------------------------------
+        # ------------------------------------------------------
         # Standalone page number
-        # ------------------------------------------
+        #
+        # Examples:
+        #
+        # 7
+        # 19
+        # iii
+        # iv
+        # ------------------------------------------------------
 
         if (
             PAGE_NUMBER_PATTERN
@@ -1470,41 +1844,12 @@ class PDFParser(BaseParser):
         ):
             return True
 
-        # ------------------------------------------
-        # Repeated running header / footer
-        # ------------------------------------------
-
-        zone = (
-            self._get_margin_zone(
-                block
-            )
-        )
-
-        if zone is not None:
-
-            signature = (
-                self
-                ._normalize_margin_signature(
-                    text
-                )
-            )
-
-            if (
-                (
-                    zone,
-                    signature,
-                )
-                in
-                repeated_margin_signatures
-            ):
-                return True
-
-        # ------------------------------------------
-        # Very conservative small top-margin noise.
+        # ------------------------------------------------------
+        # Conservative tiny top-margin noise.
         #
-        # Repetition detection above handles most
-        # real running headers.
-        # ------------------------------------------
+        # Most running headers are handled by the learned
+        # repetition detector above.
+        # ------------------------------------------------------
 
         if (
             y1
@@ -1517,18 +1862,18 @@ class PDFParser(BaseParser):
             <= 9.0
 
             and
-            len(text)
+            len(
+                text
+            )
             <= 180
         ):
             return True
 
-        # ------------------------------------------
+        # ------------------------------------------------------
         # Small footer text.
         #
-        # Preserves body footnotes with normal
-        # 10-12pt text while removing tiny running
-        # footer labels.
-        # ------------------------------------------
+        # Keep normal-size footnotes and legitimate body text.
+        # ------------------------------------------------------
 
         if (
             y0
@@ -1541,12 +1886,77 @@ class PDFParser(BaseParser):
             <= 9.5
 
             and
-            len(text)
+            len(
+                text
+            )
             <= 180
         ):
             return True
 
         return False
+
+    # ==========================================================
+    # RUNNING-MARGIN NORMALIZATION
+    # ==========================================================
+
+    def _normalize_margin_signature(
+        self,
+        text: str,
+    ) -> str:
+
+        value = (
+            self
+            ._normalize_inline_text(
+                text
+            )
+            .casefold()
+        )
+
+        # ------------------------------------------------------
+        # Normalize:
+        #
+        # Page 3
+        # Page 3 of 20
+        #
+        # into a stable representation.
+        # ------------------------------------------------------
+
+        value = re.sub(
+            r"\bpage\s+\d+"
+            r"\s*(?:of\s+\d+)?\b",
+
+            "page #",
+
+            value,
+        )
+
+        # ------------------------------------------------------
+        # Normalize trailing page numbers.
+        #
+        # Examples:
+        #
+        # Infrastructure Security 4
+        #
+        # Appendix iv
+        #
+        # This intentionally only handles a trailing standalone
+        # number / roman numeral preceded by whitespace.
+        # ------------------------------------------------------
+
+        value = re.sub(
+            r"\s+"
+            r"(?:\d+|[ivxlcdm]+)"
+            r"\s*$",
+
+            " #",
+
+            value,
+
+            flags=
+                re.IGNORECASE,
+        )
+
+        return value.strip()
 
     # ==========================================================
     # CAPTION DETECTION
@@ -1639,12 +2049,16 @@ class PDFParser(BaseParser):
 
         if (
             not text
-            or len(text) > 120
+            or len(
+                text
+            ) > 120
         ):
             return None
 
-        # Figure and table captions are structure, but they are
-        # not document headings.
+        # ------------------------------------------------------
+        # Figure/table captions should not modify heading stack.
+        # ------------------------------------------------------
+
         if (
             self._get_caption_type(
                 text
@@ -1653,8 +2067,14 @@ class PDFParser(BaseParser):
         ):
             return None
 
-        # NIST controls / bullet lines should never alter the
-        # heading stack.
+        # ------------------------------------------------------
+        # Controls and list entries should not become headings.
+        #
+        # Example:
+        #
+        # o ID.AM-01: Inventories of hardware...
+        # ------------------------------------------------------
+
         if (
             self
             ._looks_like_control_or_list(
@@ -1663,10 +2083,11 @@ class PDFParser(BaseParser):
         ):
             return None
 
-        # ------------------------------------------
+        # ------------------------------------------------------
         # Strongest signal:
-        # real PDF outline/bookmark
-        # ------------------------------------------
+        #
+        # Actual PDF outline/bookmark.
+        # ------------------------------------------------------
 
         toc_level = (
             toc_levels.get(
@@ -1686,9 +2107,16 @@ class PDFParser(BaseParser):
         ):
             return toc_level
 
-        # Long full sentences are poor heading candidates.
+        # ------------------------------------------------------
+        # Long sentence ending with punctuation is probably not
+        # a heading.
+        # ------------------------------------------------------
+
         if (
-            len(text) > 55
+            len(
+                text
+            ) > 55
+
             and
             text.endswith(
                 (
@@ -1699,9 +2127,9 @@ class PDFParser(BaseParser):
         ):
             return None
 
-        # ------------------------------------------
-        # Level 1
-        # ------------------------------------------
+        # ------------------------------------------------------
+        # LEVEL 1
+        # ------------------------------------------------------
 
         if (
             font_size
@@ -1711,9 +2139,9 @@ class PDFParser(BaseParser):
         ):
             return 1
 
-        # ------------------------------------------
-        # Level 2
-        # ------------------------------------------
+        # ------------------------------------------------------
+        # LEVEL 2
+        # ------------------------------------------------------
 
         if (
             font_size
@@ -1723,6 +2151,7 @@ class PDFParser(BaseParser):
         ):
             return 2
 
+        # From here down, smaller headings require bold.
         if not bold:
             return None
 
@@ -1740,13 +2169,14 @@ class PDFParser(BaseParser):
             )
         )
 
-        # ------------------------------------------
-        # Level 3:
-        # numbered section
+        # ------------------------------------------------------
+        # LEVEL 3
+        #
+        # Numbered section:
         #
         # 1. Overview
         # 2.1 Risk Management
-        # ------------------------------------------
+        # ------------------------------------------------------
 
         if (
             numbered_heading
@@ -1758,15 +2188,18 @@ class PDFParser(BaseParser):
             * 0.95
 
             and
-            len(text)
+            len(
+                text
+            )
             <= 100
         ):
             return 3
 
-        # ------------------------------------------
-        # Level 3:
-        # clearly larger bold label
-        # ------------------------------------------
+        # ------------------------------------------------------
+        # LEVEL 3
+        #
+        # Clearly larger bold label.
+        # ------------------------------------------------------
 
         if (
             font_size
@@ -1775,7 +2208,9 @@ class PDFParser(BaseParser):
             * 1.08
 
             and
-            len(text)
+            len(
+                text
+            )
             <= 80
 
             and
@@ -1784,17 +2219,21 @@ class PDFParser(BaseParser):
         ):
             return 3
 
-        # ------------------------------------------
-        # Level 3:
-        # very short bold body-size label
+        # ------------------------------------------------------
+        # LEVEL 3
+        #
+        # Short bold body-size labels:
         #
         # Topics
         # Preface
-        # Acknowledgments
+        # Abstract
+        # Audience
+        # Keywords
         # Note to Readers
+        # Acknowledgments
         #
-        # But NOT long controls / sentences.
-        # ------------------------------------------
+        # But not long sentences or control identifiers.
+        # ------------------------------------------------------
 
         if (
             font_size
@@ -1803,7 +2242,9 @@ class PDFParser(BaseParser):
             * 0.95
 
             and
-            len(text)
+            len(
+                text
+            )
             <= 35
 
             and
@@ -1831,6 +2272,10 @@ class PDFParser(BaseParser):
             list[str]
         ] = []
 
+        # ------------------------------------------------------
+        # Normalize every cell.
+        # ------------------------------------------------------
+
         for row in rows:
 
             normalized_row: list[
@@ -1854,7 +2299,7 @@ class PDFParser(BaseParser):
                     )
                 )
 
-                # Markdown escaping.
+                # Escape Markdown pipe characters inside data.
                 value = value.replace(
                     "|",
                     "\\|",
@@ -1864,11 +2309,13 @@ class PDFParser(BaseParser):
                     value
                 )
 
+            # Ignore completely empty rows.
             if any(
                 cell.strip()
                 for cell
                 in normalized_row
             ):
+
                 normalized.append(
                     normalized_row
                 )
@@ -1876,8 +2323,15 @@ class PDFParser(BaseParser):
         if not normalized:
             return []
 
+        # ------------------------------------------------------
+        # Make all rows the same width.
+        # ------------------------------------------------------
+
         max_columns = max(
-            len(row)
+            len(
+                row
+            )
+
             for row
             in normalized
         )
@@ -1886,17 +2340,33 @@ class PDFParser(BaseParser):
             row
             + [""] * (
                 max_columns
-                - len(row)
+                - len(
+                    row
+                )
             )
 
             for row
             in normalized
         ]
 
-        # Remove structurally empty columns.
+        # ------------------------------------------------------
+        # Remove columns that are empty across the entire table.
         #
-        # This is what fixed the NIST 9-column table
-        # into its real 3-column representation.
+        # This fixes PDF layout spacer columns.
+        #
+        # Example NIST raw extraction:
+        #
+        # 9 physical columns
+        #
+        # became:
+        #
+        # Function
+        # Category
+        # Category Identifier
+        #
+        # = 3 real columns.
+        # ------------------------------------------------------
+
         columns_to_keep = [
             column_index
 
@@ -1918,7 +2388,7 @@ class PDFParser(BaseParser):
         if not columns_to_keep:
             return []
 
-        return [
+        cleaned_rows = [
             [
                 row[
                     column_index
@@ -1931,6 +2401,8 @@ class PDFParser(BaseParser):
             for row
             in padded_rows
         ]
+
+        return cleaned_rows
 
     # ==========================================================
     # TABLE -> MARKDOWN
@@ -1947,7 +2419,10 @@ class PDFParser(BaseParser):
             return ""
 
         column_count = max(
-            len(row)
+            len(
+                row
+            )
+
             for row
             in rows
         )
@@ -1959,18 +2434,24 @@ class PDFParser(BaseParser):
             row
             + [""] * (
                 column_count
-                - len(row)
+                - len(
+                    row
+                )
             )
 
             for row
             in rows
         ]
 
+        header = (
+            padded_rows[0]
+        )
+
         lines = [
             (
                 "| "
                 + " | ".join(
-                    padded_rows[0]
+                    header
                 )
                 + " |"
             ),
@@ -2050,16 +2531,20 @@ class PDFParser(BaseParser):
             intersection_height
         )
 
+        block_width = max(
+            0.0,
+            ax1 - ax0,
+        )
+
+        block_height = max(
+            0.0,
+            ay1 - ay0,
+        )
+
         block_area = (
-            max(
-                0.0,
-                ax1 - ax0,
-            )
+            block_width
             *
-            max(
-                0.0,
-                ay1 - ay0,
-            )
+            block_height
         )
 
         if block_area == 0:
@@ -2080,6 +2565,7 @@ class PDFParser(BaseParser):
         value: str,
     ) -> str:
 
+        # Unicode normalization.
         value = (
             unicodedata.normalize(
                 "NFKC",
@@ -2089,7 +2575,13 @@ class PDFParser(BaseParser):
             )
         )
 
-        # Remove invisible Unicode format characters.
+        # ------------------------------------------------------
+        # Remove invisible Unicode formatting characters.
+        #
+        # Important for PDFs where "empty" table spacer cells
+        # actually contain zero-width / formatting characters.
+        # ------------------------------------------------------
+
         value = "".join(
             char
 
@@ -2116,6 +2608,7 @@ class PDFParser(BaseParser):
             )
         )
 
+        # Collapse repeated whitespace.
         value = re.sub(
             r"\s+",
             " ",
@@ -2123,6 +2616,10 @@ class PDFParser(BaseParser):
         )
 
         return value.strip()
+
+    # ==========================================================
+    # TEXT MATCH NORMALIZATION
+    # ==========================================================
 
     def _normalize_match_text(
         self,
