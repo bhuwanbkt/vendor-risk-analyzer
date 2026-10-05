@@ -17,6 +17,7 @@ RUN uv sync \
 COPY src ./src
 COPY alembic.ini ./
 COPY migrations ./migrations
+COPY scripts ./scripts
 
 RUN uv sync \
     --frozen \
