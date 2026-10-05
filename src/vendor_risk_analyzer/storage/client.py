@@ -67,3 +67,22 @@ def get_object_metadata(
             return None
 
         raise
+
+def download_object(
+    object_key: str,
+) -> bytes:
+
+    client = get_storage_client()
+
+    response = client.get_object(
+        Bucket=settings.object_storage_bucket,
+        Key=object_key,
+    )
+
+    body = response["Body"]
+
+    try:
+        return body.read()
+
+    finally:
+        body.close()
