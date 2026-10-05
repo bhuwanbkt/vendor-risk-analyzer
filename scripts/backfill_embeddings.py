@@ -69,13 +69,21 @@ def normalize_database_url(database_url: str) -> str:
         )
     )
 
-    # Neon may provide this, but asyncpg does not need it here.
+    # Neon may include this parameter.
+    # asyncpg does not need it here.
     query_params.pop(
         "channel_binding",
         None,
     )
 
-    # Convert sslmode=require to ssl=require for asyncpg.
+    # Neon commonly provides:
+    #
+    #     sslmode=require
+    #
+    # asyncpg expects:
+    #
+    #     ssl=require
+    #
     sslmode = query_params.pop(
         "sslmode",
         None,
@@ -84,6 +92,7 @@ def normalize_database_url(database_url: str) -> str:
     if sslmode and "ssl" not in query_params:
         query_params["ssl"] = sslmode
 
+    # Useful for managed PostgreSQL / poolers.
     query_params.setdefault(
         "prepared_statement_cache_size",
         "0",
@@ -129,13 +138,13 @@ def build_embedding_title(
     metadata: dict[str, Any],
 ) -> str | None:
     """
-    Build a useful structural title for the embedding.
+    Build useful structural context for the embedding.
 
     Priority:
-      heading_path
-      table_title
-      caption
-      sheet_name
+        heading_path
+        table_title
+        caption
+        sheet_name
     """
 
     heading_path = metadata.get(
@@ -174,9 +183,11 @@ def vector_to_pgvector_literal(
     embedding: list[float],
 ) -> str:
     """
-    Convert Python floats into pgvector text format:
+    Convert Python floats into pgvector text format.
 
-        [0.1,-0.2,0.3,...]
+    Example:
+
+        [0.1,-0.2,0.3]
     """
 
     return (
@@ -247,32 +258,33 @@ async def save_embedding(
     dimensions: int,
 ) -> None:
     """
-    Save one embedding.
+    Save one embedding to PostgreSQL.
 
-    The WHERE embedding IS NULL condition protects us from
-    accidentally overwriting an existing vector.
+    Safety:
+    - only updates the requested chunk
+    - only updates when embedding IS NULL
+    - explicitly casts bind parameters so PostgreSQL/asyncpg
+      can determine their types
     """
 
-    embedding_literal = (
-        vector_to_pgvector_literal(
-            embedding
-        )
+    embedding_literal = vector_to_pgvector_literal(
+        embedding
     )
 
     sql = text(
         """
         UPDATE document_chunks
         SET
-            embedding = CAST(:embedding AS vector),
+            embedding = CAST(:embedding AS vector(768)),
             metadata =
                 COALESCE(metadata, '{}'::jsonb)
                 || jsonb_build_object(
                     'embedding_provider',
                     'google',
                     'embedding_model',
-                    :embedding_model,
+                    CAST(:embedding_model AS text),
                     'embedding_dimensions',
-                    :embedding_dimensions
+                    CAST(:embedding_dimensions AS integer)
                 ),
             updated_at = NOW()
         WHERE id = CAST(:chunk_id AS uuid)
@@ -337,11 +349,10 @@ async def count_embeddings(
 ) -> tuple[int, int]:
     """
     Return:
+
         total chunks
         chunks that already have embeddings
     """
-
-    result = None
 
     async with engine.connect() as connection:
         result = await connection.execute(
@@ -401,7 +412,7 @@ async def main() -> None:
             "--limit must be at least 1."
         )
 
-    # Safety protection for this first implementation.
+    # Keep the initial validation stage intentionally small.
     if args.limit > 10:
         raise ValueError(
             "--limit cannot exceed 10 during "
@@ -471,15 +482,19 @@ async def main() -> None:
             print(
                 f"[{index}/{len(chunks)}]"
             )
+
             print(
                 f"Chunk ID: {chunk['id']}"
             )
+
             print(
                 f"Document ID: {chunk['document_id']}"
             )
+
             print(
                 f"Sequence: {chunk['sequence']}"
             )
+
             print(
                 f"Title: {title or '(none)'}"
             )
@@ -530,14 +545,17 @@ async def main() -> None:
             print(
                 "Saved to PostgreSQL."
             )
+
             print(
                 "Database has embedding: "
                 f"{verification['has_embedding']}"
             )
+
             print(
                 "Database dimensions: "
                 f"{verification['dimensions']}"
             )
+
             print()
 
         _, embedded_after = (
@@ -545,18 +563,21 @@ async def main() -> None:
         )
 
         print("------------------")
+
         print(
             f"Embedded before: {embedded_before}"
         )
+
         print(
             f"Embedded after:  {embedded_after}"
         )
 
         if args.write:
             print(
-                f"New embeddings saved: "
+                "New embeddings saved: "
                 f"{embedded_after - embedded_before}"
             )
+
         else:
             print(
                 "Dry run completed. Database was not modified."
