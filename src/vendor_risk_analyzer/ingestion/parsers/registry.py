@@ -11,11 +11,14 @@ from vendor_risk_analyzer.ingestion.parsers.pdf import (
     PDFParser,
 )
 
+from vendor_risk_analyzer.ingestion.parsers.docx import DOCXParser
+
 
 PARSERS: list[BaseParser] = [
     TextParser(),
     MarkdownParser(),
     PDFParser(),
+    DOCXParser(),
 ]
 
 
