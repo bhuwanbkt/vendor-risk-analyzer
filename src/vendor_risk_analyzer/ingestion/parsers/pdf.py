@@ -9,12 +9,6 @@ from vendor_risk_analyzer.ingestion.parsers.base import (
 )
 
 
-# Matches standalone page numbers such as:
-# 1
-# 10
-# iii
-# iv
-# xii
 PAGE_NUMBER_PATTERN = re.compile(
     r"^(?:\d+|[ivxlcdm]+)$",
     re.IGNORECASE,
@@ -39,7 +33,7 @@ class PDFParser(BaseParser):
 
             # ==================================================
             # PASS 1
-            # Extract PDF text blocks and layout information
+            # Extract text and layout information
             # ==================================================
 
             for page_index, page in enumerate(
@@ -57,9 +51,8 @@ class PDFParser(BaseParser):
                     "blocks",
                     [],
                 ):
-                    # PyMuPDF block type:
-                    # 0 = text
-                    # 1 = image
+
+                    # 0 = text block
                     if block.get("type") != 0:
                         continue
 
@@ -72,6 +65,7 @@ class PDFParser(BaseParser):
                         "lines",
                         [],
                     ):
+
                         line_parts: list[str] = []
 
                         for span in line.get(
@@ -129,65 +123,54 @@ class PDFParser(BaseParser):
                     if not text:
                         continue
 
-                    bbox = block.get(
-                        "bbox"
-                    )
-
                     raw_blocks.append(
                         {
                             "text": text,
+
                             "page_number":
                                 page_index + 1,
+
                             "page_height":
                                 page_height,
+
                             "font_sizes":
                                 font_sizes,
+
                             "bold":
                                 bold_detected,
+
                             "bbox":
-                                bbox,
+                                block.get(
+                                    "bbox"
+                                ),
                         }
                     )
 
             # ==================================================
             # PASS 2
-            # Remove obvious PDF noise
-            #
-            # Examples:
-            #
-            # Introduction to AWS Security AWS Whitepaper
-            #
-            # 3
-            #
-            # Infrastructure Security 4
+            # Remove headers, footers and page numbers
             # ==================================================
 
-            cleaned_blocks: list[dict] = []
-
-            for block in raw_blocks:
-                if self._is_noise(
-                    block
-                ):
-                    continue
-
-                cleaned_blocks.append(
+            cleaned_blocks = [
+                block
+                for block in raw_blocks
+                if not self._is_noise(
                     block
                 )
+            ]
 
             # ==================================================
             # PASS 3
-            # Determine approximate body font size
-            #
-            # We calculate this after removing headers/footers.
+            # Estimate body font size
             # ==================================================
 
-            all_font_sizes: list[
-                float
-            ] = []
+            all_font_sizes: list[float] = []
 
             for block in cleaned_blocks:
                 all_font_sizes.extend(
-                    block["font_sizes"]
+                    block[
+                        "font_sizes"
+                    ]
                 )
 
             body_font_size = (
@@ -200,16 +183,24 @@ class PDFParser(BaseParser):
 
             # ==================================================
             # PASS 4
-            # Convert cleaned PDF blocks into ParsedElement
+            # Create elements with heading hierarchy
             # ==================================================
 
             elements: list[
                 ParsedElement
             ] = []
 
-            current_heading: (
-                str | None
-            ) = None
+            # Example:
+            #
+            # {
+            #     1: "Security Products and Features",
+            #     2: "Data Encryption"
+            # }
+            #
+            heading_stack: dict[
+                int,
+                str,
+            ] = {}
 
             for block in cleaned_blocks:
 
@@ -223,47 +214,66 @@ class PDFParser(BaseParser):
                             "font_sizes"
                         ]
                     )
-
                 else:
                     block_font_size = (
                         body_font_size
                     )
 
-                # ==============================================
-                # Heading Detection
-                #
-                # Current heuristic:
-                #
-                # - relatively large font
-                # OR
-                # - bold + short text
-                #
-                # Later we will improve this into
-                # hierarchical heading levels.
-                # ==============================================
+                heading_level = (
+                    self._get_heading_level(
+                        text=text,
 
-                looks_like_heading = (
-                    len(text) <= 120
-                    and (
-                        block_font_size
-                        >= body_font_size
-                        * 1.25
+                        font_size=
+                            block_font_size,
 
-                        or (
-                            block["bold"]
-                            and len(text)
-                            <= 80
-                        )
+                        body_font_size=
+                            body_font_size,
+
+                        bold=
+                            block["bold"],
                     )
                 )
 
-                # ----------------------------------------------
-                # Heading
-                # ----------------------------------------------
+                # ==============================================
+                # HEADING
+                # ==============================================
 
-                if looks_like_heading:
+                if heading_level is not None:
 
-                    current_heading = text
+                    # Remove current heading and all
+                    # deeper headings.
+                    #
+                    # Example:
+                    #
+                    # level 1: Security Products
+                    # level 2: Data Encryption
+                    #
+                    # New level 2:
+                    # Identity and Access Control
+                    #
+                    # Data Encryption gets replaced.
+
+                    for existing_level in list(
+                        heading_stack.keys()
+                    ):
+                        if (
+                            existing_level
+                            >= heading_level
+                        ):
+                            del heading_stack[
+                                existing_level
+                            ]
+
+                    heading_stack[
+                        heading_level
+                    ] = text
+
+                    heading_path = [
+                        heading_stack[level]
+                        for level in sorted(
+                            heading_stack
+                        )
+                    ]
 
                     elements.append(
                         ParsedElement(
@@ -280,11 +290,13 @@ class PDFParser(BaseParser):
                             section_title=
                                 text,
 
-                            heading_path=[
-                                text
-                            ],
+                            heading_path=
+                                heading_path,
 
                             metadata={
+                                "heading_level":
+                                    heading_level,
+
                                 "font_size":
                                     block_font_size,
 
@@ -303,17 +315,22 @@ class PDFParser(BaseParser):
 
                     continue
 
-                # ----------------------------------------------
-                # Paragraph
-                # ----------------------------------------------
+                # ==============================================
+                # PARAGRAPH
+                # ==============================================
 
-                if current_heading:
-                    heading_path = [
-                        current_heading
-                    ]
+                heading_path = [
+                    heading_stack[level]
+                    for level in sorted(
+                        heading_stack
+                    )
+                ]
 
-                else:
-                    heading_path = []
+                section_title = (
+                    heading_path[-1]
+                    if heading_path
+                    else None
+                )
 
                 elements.append(
                     ParsedElement(
@@ -328,7 +345,7 @@ class PDFParser(BaseParser):
                             ],
 
                         section_title=
-                            current_heading,
+                            section_title,
 
                         heading_path=
                             heading_path,
@@ -351,7 +368,82 @@ class PDFParser(BaseParser):
             document.close()
 
     # ==========================================================
-    # PDF NOISE DETECTION
+    # HEADING LEVEL DETECTION
+    # ==========================================================
+
+    def _get_heading_level(
+        self,
+        *,
+        text: str,
+        font_size: float,
+        body_font_size: float,
+        bold: bool,
+    ) -> int | None:
+
+        if len(text) > 120:
+            return None
+
+        # ------------------------------------------------------
+        # LEVEL 1
+        #
+        # Major sections.
+        #
+        # AWS PDF example:
+        #
+        # Security Products and Features
+        # Security Guidance
+        # Compliance
+        #
+        # Body ≈ 12pt
+        # Major heading ≈ 20pt
+        # ------------------------------------------------------
+
+        if (
+            font_size
+            >= body_font_size * 1.60
+        ):
+            return 1
+
+        # ------------------------------------------------------
+        # LEVEL 2
+        #
+        # Subsections.
+        #
+        # Example:
+        #
+        # Infrastructure Security
+        # Data Encryption
+        # Identity and Access Control
+        #
+        # ≈ 18pt
+        # ------------------------------------------------------
+
+        if (
+            font_size
+            >= body_font_size * 1.38
+        ):
+            return 2
+
+        # ------------------------------------------------------
+        # LEVEL 3
+        #
+        # Smaller bold labels/headings.
+        #
+        # Example:
+        #
+        # Topics
+        # ------------------------------------------------------
+
+        if (
+            bold
+            and len(text) <= 80
+        ):
+            return 3
+
+        return None
+
+    # ==========================================================
+    # HEADER / FOOTER / PAGE NUMBER FILTERING
     # ==========================================================
 
     def _is_noise(
@@ -360,7 +452,9 @@ class PDFParser(BaseParser):
     ) -> bool:
 
         text = (
-            block["text"]
+            block[
+                "text"
+            ]
             .strip()
         )
 
@@ -387,39 +481,27 @@ class PDFParser(BaseParser):
             else 0
         )
 
-        # ======================================================
-        # RULE 1
-        # Remove standalone page numbers
-        #
-        # Examples:
+        # ------------------------------------------------------
+        # Standalone page number
         #
         # 1
-        # 2
-        # 12
+        # 7
         # iii
         # iv
-        #
-        # Only remove them when they appear near bottom.
-        # ======================================================
+        # ------------------------------------------------------
 
         if (
             PAGE_NUMBER_PATTERN
             .fullmatch(text)
+
             and y0
             > page_height * 0.85
         ):
             return True
 
-        # ======================================================
-        # RULE 2
-        # Remove small page headers
-        #
-        # Example:
-        #
-        # Introduction to AWS Security AWS Whitepaper
-        #
-        # Typically appears in top ~7% of page.
-        # ======================================================
+        # ------------------------------------------------------
+        # Small page header
+        # ------------------------------------------------------
 
         if (
             y1
@@ -433,20 +515,9 @@ class PDFParser(BaseParser):
         ):
             return True
 
-        # ======================================================
-        # RULE 3
-        # Remove small page footers
-        #
-        # Examples:
-        #
-        # Infrastructure Security 4
-        #
-        # Inventory and Configuration Management 5
-        #
-        # Monitoring and Logging 6
-        #
-        # Typically appears in bottom ~10% of page.
-        # ======================================================
+        # ------------------------------------------------------
+        # Small page footer
+        # ------------------------------------------------------
 
         if (
             y0
@@ -459,9 +530,5 @@ class PDFParser(BaseParser):
             <= 150
         ):
             return True
-
-        # ======================================================
-        # Otherwise keep block
-        # ======================================================
 
         return False
