@@ -22,7 +22,6 @@ class PDFParser(BaseParser):
         self,
         content: bytes,
     ) -> list[ParsedElement]:
-
         document = pymupdf.open(
             stream=content,
             filetype="pdf",
@@ -33,24 +32,21 @@ class PDFParser(BaseParser):
 
             # ==================================================
             # PASS 1
-            # Extract text + tables from every page
+            # Extract text blocks and tables from every page
             # ==================================================
 
-            for page_index, page in enumerate(
-                document
-            ):
-                page_height = float(
-                    page.rect.height
-                )
+            for page_index, page in enumerate(document):
+                page_number = page_index + 1
+                page_height = float(page.rect.height)
 
                 page_blocks: list[dict] = []
 
                 # ----------------------------------------------
-                # First find tables.
+                # Find tables first.
                 #
-                # We do this before text extraction so that
-                # table text does not get duplicated later as
-                # normal paragraph blocks.
+                # We do this before regular text extraction so
+                # text inside a detected table is not stored
+                # again as normal paragraph text.
                 # ----------------------------------------------
 
                 table_bboxes: list[
@@ -58,25 +54,19 @@ class PDFParser(BaseParser):
                 ] = []
 
                 try:
-                    table_finder = (
-                        page.find_tables()
-                    )
-
-                    tables = (
-                        table_finder.tables
-                    )
+                    table_finder = page.find_tables()
+                    tables = table_finder.tables
 
                 except Exception:
-                    # Some PDFs may not support useful
-                    # table detection. Text parsing should
-                    # still continue.
+                    # A PDF may have no detectable tables or
+                    # table detection may fail on unusual layouts.
+                    # Regular text extraction should still work.
                     tables = []
 
-                for table_index, table in enumerate(
-                    tables
-                ):
+                for table_index, table in enumerate(tables):
                     bbox = tuple(
-                        table.bbox
+                        float(value)
+                        for value in table.bbox
                     )
 
                     rows = table.extract()
@@ -93,18 +83,18 @@ class PDFParser(BaseParser):
                     if not normalized_rows:
                         continue
 
-                    column_count = max(
-                        len(row)
-                        for row
-                        in normalized_rows
-                    )
-
                     row_count = len(
                         normalized_rows
                     )
 
-                    # Ignore things that are unlikely to
-                    # actually be tables.
+                    column_count = max(
+                        len(row)
+                        for row in normalized_rows
+                    )
+
+                    # Something with fewer than 2 rows or
+                    # fewer than 2 meaningful columns is
+                    # probably not useful as a table.
                     if (
                         row_count < 2
                         or column_count < 2
@@ -127,35 +117,20 @@ class PDFParser(BaseParser):
                     page_blocks.append(
                         {
                             "kind": "table",
-
                             "text": markdown,
-
-                            "page_number":
-                                page_index + 1,
-
-                            "page_height":
-                                page_height,
-
-                            "bbox":
-                                bbox,
-
-                            "table_index":
-                                table_index,
-
-                            "row_count":
-                                row_count,
-
-                            "column_count":
-                                column_count,
-
+                            "page_number": page_number,
+                            "page_height": page_height,
+                            "bbox": bbox,
+                            "table_index": table_index,
+                            "row_count": row_count,
+                            "column_count": column_count,
                             "font_sizes": [],
-
                             "bold": False,
                         }
                     )
 
                 # ----------------------------------------------
-                # Extract regular text blocks
+                # Extract normal text blocks
                 # ----------------------------------------------
 
                 page_dict = page.get_text(
@@ -166,7 +141,9 @@ class PDFParser(BaseParser):
                     "blocks",
                     [],
                 ):
+                    # PyMuPDF:
                     # 0 = text
+                    # 1 = image
                     if block.get("type") != 0:
                         continue
 
@@ -177,11 +154,21 @@ class PDFParser(BaseParser):
                     if not block_bbox:
                         continue
 
-                    # If most of this text block is inside
-                    # a detected table, skip it.
+                    block_bbox = tuple(
+                        float(value)
+                        for value in block_bbox
+                    )
+
+                    # ------------------------------------------
+                    # Prevent table content from also becoming
+                    # normal paragraph content.
                     #
-                    # The table element will preserve it.
-                    if any(
+                    # If at least 50% of the text block lies
+                    # inside a detected table, the table element
+                    # owns that content.
+                    # ------------------------------------------
+
+                    inside_table = any(
                         self._bbox_overlap_ratio(
                             block_bbox,
                             table_bbox,
@@ -189,14 +176,13 @@ class PDFParser(BaseParser):
                         >= 0.50
                         for table_bbox
                         in table_bboxes
-                    ):
+                    )
+
+                    if inside_table:
                         continue
 
                     lines: list[str] = []
-
-                    font_sizes: list[
-                        float
-                    ] = []
+                    font_sizes: list[float] = []
 
                     bold_detected = False
 
@@ -204,15 +190,13 @@ class PDFParser(BaseParser):
                         "lines",
                         [],
                     ):
-                        line_parts: list[
-                            str
-                        ] = []
+                        line_parts: list[str] = []
 
                         for span in line.get(
                             "spans",
                             [],
                         ):
-                            text = (
+                            span_text = (
                                 span
                                 .get(
                                     "text",
@@ -221,11 +205,11 @@ class PDFParser(BaseParser):
                                 .strip()
                             )
 
-                            if not text:
+                            if not span_text:
                                 continue
 
                             line_parts.append(
-                                text
+                                span_text
                             )
 
                             size = span.get(
@@ -247,16 +231,11 @@ class PDFParser(BaseParser):
                             )
 
                             if (
-                                "bold"
-                                in font_name
-                                or "black"
-                                in font_name
-                                or "semibold"
-                                in font_name
+                                "bold" in font_name
+                                or "black" in font_name
+                                or "semibold" in font_name
                             ):
-                                bold_detected = (
-                                    True
-                                )
+                                bold_detected = True
 
                         line_text = " ".join(
                             line_parts
@@ -277,49 +256,31 @@ class PDFParser(BaseParser):
                     page_blocks.append(
                         {
                             "kind": "text",
-
                             "text": text,
-
-                            "page_number":
-                                page_index + 1,
-
-                            "page_height":
-                                page_height,
-
-                            "font_sizes":
-                                font_sizes,
-
-                            "bold":
-                                bold_detected,
-
-                            "bbox":
-                                tuple(
-                                    block_bbox
-                                ),
+                            "page_number": page_number,
+                            "page_height": page_height,
+                            "font_sizes": font_sizes,
+                            "bold": bold_detected,
+                            "bbox": block_bbox,
                         }
                     )
 
                 # ----------------------------------------------
-                # Restore approximate reading order
+                # Restore approximate PDF reading order.
                 #
-                # Sort by vertical position first,
-                # then horizontal position.
+                # Vertical position first, then horizontal.
                 # ----------------------------------------------
 
                 page_blocks.sort(
                     key=lambda item: (
                         (
                             item["bbox"][1]
-                            if item.get(
-                                "bbox"
-                            )
+                            if item.get("bbox")
                             else 0
                         ),
                         (
                             item["bbox"][0]
-                            if item.get(
-                                "bbox"
-                            )
+                            if item.get("bbox")
                             else 0
                         ),
                     )
@@ -331,7 +292,7 @@ class PDFParser(BaseParser):
 
             # ==================================================
             # PASS 2
-            # Remove PDF headers / footers / page numbers
+            # Remove obvious headers, footers and page numbers
             # ==================================================
 
             cleaned_blocks = [
@@ -344,15 +305,13 @@ class PDFParser(BaseParser):
 
             # ==================================================
             # PASS 3
-            # Estimate body font size
+            # Estimate normal document body font size.
             #
-            # Only regular text contributes.
-            # Tables do not have font-size information here.
+            # Tables are excluded because they do not carry
+            # font-size information in our normalized structure.
             # ==================================================
 
-            all_font_sizes: list[
-                float
-            ] = []
+            all_font_sizes: list[float] = []
 
             for block in cleaned_blocks:
                 if (
@@ -362,9 +321,7 @@ class PDFParser(BaseParser):
                     continue
 
                 all_font_sizes.extend(
-                    block[
-                        "font_sizes"
-                    ]
+                    block["font_sizes"]
                 )
 
             body_font_size = (
@@ -377,13 +334,20 @@ class PDFParser(BaseParser):
 
             # ==================================================
             # PASS 4
-            # Convert into normalized ParsedElements
+            # Convert normalized PDF blocks into ParsedElements
             # ==================================================
 
             elements: list[
                 ParsedElement
             ] = []
 
+            # Example:
+            #
+            # {
+            #     1: "Security Products and Features",
+            #     2: "Data Encryption"
+            # }
+            #
             heading_stack: dict[
                 int,
                 str,
@@ -401,8 +365,7 @@ class PDFParser(BaseParser):
                 ):
                     heading_path = [
                         heading_stack[level]
-                        for level
-                        in sorted(
+                        for level in sorted(
                             heading_stack
                         )
                     ]
@@ -415,39 +378,30 @@ class PDFParser(BaseParser):
 
                     elements.append(
                         ParsedElement(
-                            element_type=
-                                "table",
-
-                            content=
-                                block["text"],
-
-                            page_number=
-                                block[
-                                    "page_number"
-                                ],
-
-                            section_title=
-                                section_title,
-
-                            heading_path=
-                                heading_path,
-
+                            element_type="table",
+                            content=block["text"],
+                            page_number=block[
+                                "page_number"
+                            ],
+                            section_title=(
+                                section_title
+                            ),
+                            heading_path=(
+                                heading_path
+                            ),
                             metadata={
                                 "bbox":
                                     block[
                                         "bbox"
                                     ],
-
                                 "table_index":
                                     block[
                                         "table_index"
                                     ],
-
                                 "row_count":
                                     block[
                                         "row_count"
                                     ],
-
                                 "column_count":
                                     block[
                                         "column_count"
@@ -466,9 +420,7 @@ class PDFParser(BaseParser):
                     "text"
                 ]
 
-                if block[
-                    "font_sizes"
-                ]:
+                if block["font_sizes"]:
                     block_font_size = max(
                         block[
                             "font_sizes"
@@ -483,17 +435,15 @@ class PDFParser(BaseParser):
                 heading_level = (
                     self._get_heading_level(
                         text=text,
-
-                        font_size=
-                            block_font_size,
-
-                        body_font_size=
-                            body_font_size,
-
-                        bold=
-                            block[
-                                "bold"
-                            ],
+                        font_size=(
+                            block_font_size
+                        ),
+                        body_font_size=(
+                            body_font_size
+                        ),
+                        bold=block[
+                            "bold"
+                        ],
                     )
                 )
 
@@ -503,8 +453,23 @@ class PDFParser(BaseParser):
 
                 if heading_level is not None:
 
-                    # Remove this heading level
-                    # and everything below it.
+                    # When a new heading appears, remove
+                    # headings at the same level or deeper.
+                    #
+                    # Example:
+                    #
+                    # Level 1:
+                    # Security Products and Features
+                    #
+                    # Level 2:
+                    # Data Encryption
+                    #
+                    # New Level 2:
+                    # Identity and Access Control
+                    #
+                    # Data Encryption is replaced.
+                    # ------------------------------------------
+
                     for existing_level in list(
                         heading_stack.keys()
                     ):
@@ -522,42 +487,33 @@ class PDFParser(BaseParser):
 
                     heading_path = [
                         heading_stack[level]
-                        for level
-                        in sorted(
+                        for level in sorted(
                             heading_stack
                         )
                     ]
 
                     elements.append(
                         ParsedElement(
-                            element_type=
-                                "heading",
-
+                            element_type=(
+                                "heading"
+                            ),
                             content=text,
-
-                            page_number=
-                                block[
-                                    "page_number"
-                                ],
-
-                            section_title=
-                                text,
-
-                            heading_path=
-                                heading_path,
-
+                            page_number=block[
+                                "page_number"
+                            ],
+                            section_title=text,
+                            heading_path=(
+                                heading_path
+                            ),
                             metadata={
                                 "heading_level":
                                     heading_level,
-
                                 "font_size":
                                     block_font_size,
-
                                 "bold":
                                     block[
                                         "bold"
                                     ],
-
                                 "bbox":
                                     block[
                                         "bbox"
@@ -574,8 +530,7 @@ class PDFParser(BaseParser):
 
                 heading_path = [
                     heading_stack[level]
-                    for level
-                    in sorted(
+                    for level in sorted(
                         heading_stack
                     )
                 ]
@@ -588,26 +543,22 @@ class PDFParser(BaseParser):
 
                 elements.append(
                     ParsedElement(
-                        element_type=
-                            "paragraph",
-
+                        element_type=(
+                            "paragraph"
+                        ),
                         content=text,
-
-                        page_number=
-                            block[
-                                "page_number"
-                            ],
-
-                        section_title=
-                            section_title,
-
-                        heading_path=
-                            heading_path,
-
+                        page_number=block[
+                            "page_number"
+                        ],
+                        section_title=(
+                            section_title
+                        ),
+                        heading_path=(
+                            heading_path
+                        ),
                         metadata={
                             "font_size":
                                 block_font_size,
-
                             "bbox":
                                 block[
                                     "bbox"
@@ -629,19 +580,21 @@ class PDFParser(BaseParser):
         self,
         rows: list,
     ) -> list[list[str]]:
-
         normalized: list[
             list[str]
         ] = []
 
-        for row in rows:
+        # ------------------------------------------------------
+        # STEP 1
+        # Normalize every individual table cell.
+        # ------------------------------------------------------
 
+        for row in rows:
             normalized_row: list[
                 str
             ] = []
 
             for cell in row:
-
                 if cell is None:
                     value = ""
 
@@ -663,7 +616,25 @@ class PDFParser(BaseParser):
                     .strip()
                 )
 
-                # Markdown table escaping
+                # Collapse repeated spaces.
+                #
+                # Example:
+                #
+                # "Risk     Management"
+                #
+                # becomes:
+                #
+                # "Risk Management"
+                # ----------------------------------------------
+
+                value = re.sub(
+                    r"\s+",
+                    " ",
+                    value,
+                )
+
+                # Escape markdown pipe characters appearing
+                # inside actual cell values.
                 value = value.replace(
                     "|",
                     "\\|",
@@ -673,17 +644,107 @@ class PDFParser(BaseParser):
                     value
                 )
 
-            # Ignore completely empty rows
+            # Ignore rows where every cell is empty.
             if any(
-                cell
-                for cell
-                in normalized_row
+                cell.strip()
+                for cell in normalized_row
             ):
                 normalized.append(
                     normalized_row
                 )
 
-        return normalized
+        if not normalized:
+            return []
+
+        # ------------------------------------------------------
+        # STEP 2
+        # Make every row have the same physical width.
+        # ------------------------------------------------------
+
+        max_columns = max(
+            len(row)
+            for row in normalized
+        )
+
+        padded_rows: list[
+            list[str]
+        ] = []
+
+        for row in normalized:
+            padded_row = (
+                row
+                + [""] * (
+                    max_columns
+                    - len(row)
+                )
+            )
+
+            padded_rows.append(
+                padded_row
+            )
+
+        # ------------------------------------------------------
+        # STEP 3
+        # Detect columns containing meaningful data.
+        #
+        # This fixes PDFs such as NIST CSF where PyMuPDF may
+        # detect spacer columns.
+        #
+        # Example raw table:
+        #
+        # | "" | Function | "" | "" | Category | "" |
+        # | "" | ...      | "" | "" | ...      | "" |
+        #
+        # Desired table:
+        #
+        # | Function | Category | Category Identifier |
+        # ------------------------------------------------------
+
+        columns_to_keep: list[
+            int
+        ] = []
+
+        for column_index in range(
+            max_columns
+        ):
+            has_content = any(
+                row[
+                    column_index
+                ].strip()
+                for row in padded_rows
+            )
+
+            if has_content:
+                columns_to_keep.append(
+                    column_index
+                )
+
+        if not columns_to_keep:
+            return []
+
+        # ------------------------------------------------------
+        # STEP 4
+        # Remove columns that are empty in every row.
+        # ------------------------------------------------------
+
+        cleaned_rows: list[
+            list[str]
+        ] = []
+
+        for row in padded_rows:
+            cleaned_row = [
+                row[
+                    column_index
+                ]
+                for column_index
+                in columns_to_keep
+            ]
+
+            cleaned_rows.append(
+                cleaned_row
+            )
+
+        return cleaned_rows
 
     # ==========================================================
     # TABLE → MARKDOWN
@@ -693,20 +754,23 @@ class PDFParser(BaseParser):
         self,
         rows: list[list[str]],
     ) -> str:
-
         if not rows:
             return ""
 
         column_count = max(
             len(row)
-            for row
-            in rows
+            for row in rows
         )
 
-        padded_rows = []
+        if column_count == 0:
+            return ""
+
+        padded_rows: list[
+            list[str]
+        ] = []
 
         for row in rows:
-            padded = (
+            padded_row = (
                 row
                 + [""] * (
                     column_count
@@ -715,27 +779,33 @@ class PDFParser(BaseParser):
             )
 
             padded_rows.append(
-                padded
+                padded_row
             )
 
+        # First row becomes the Markdown header.
         header = padded_rows[0]
 
         lines = [
-            "| "
-            + " | ".join(
-                header
-            )
-            + " |",
-
-            "| "
-            + " | ".join(
-                ["---"]
-                * column_count
-            )
-            + " |",
+            (
+                "| "
+                + " | ".join(
+                    header
+                )
+                + " |"
+            ),
+            (
+                "| "
+                + " | ".join(
+                    ["---"]
+                    * column_count
+                )
+                + " |"
+            ),
         ]
 
-        for row in padded_rows[1:]:
+        for row in padded_rows[
+            1:
+        ]:
             lines.append(
                 "| "
                 + " | ".join(
@@ -757,7 +827,6 @@ class PDFParser(BaseParser):
         block_bbox,
         table_bbox,
     ) -> float:
-
         ax0, ay0, ax1, ay1 = (
             block_bbox
         )
@@ -795,12 +864,19 @@ class PDFParser(BaseParser):
             * intersection_height
         )
 
-        block_area = max(
+        block_width = max(
             0.0,
             ax1 - ax0,
-        ) * max(
+        )
+
+        block_height = max(
             0.0,
             ay1 - ay0,
+        )
+
+        block_area = (
+            block_width
+            * block_height
         )
 
         if block_area == 0:
@@ -823,11 +899,25 @@ class PDFParser(BaseParser):
         body_font_size: float,
         bold: bool,
     ) -> int | None:
-
+        # Long text is almost certainly a paragraph,
+        # not a heading.
         if len(text) > 120:
             return None
 
-        # Major section
+        # ------------------------------------------------------
+        # LEVEL 1
+        #
+        # Example:
+        #
+        # Security Products and Features
+        # Security Guidance
+        # Compliance
+        #
+        # Typical:
+        # body ≈ 12
+        # heading ≈ 20
+        # ------------------------------------------------------
+
         if (
             font_size
             >= body_font_size
@@ -835,7 +925,20 @@ class PDFParser(BaseParser):
         ):
             return 1
 
-        # Subsection
+        # ------------------------------------------------------
+        # LEVEL 2
+        #
+        # Example:
+        #
+        # Infrastructure Security
+        # Data Encryption
+        # Identity and Access Control
+        #
+        # Typical:
+        # body ≈ 12
+        # heading ≈ 18
+        # ------------------------------------------------------
+
         if (
             font_size
             >= body_font_size
@@ -843,7 +946,16 @@ class PDFParser(BaseParser):
         ):
             return 2
 
-        # Smaller bold heading
+        # ------------------------------------------------------
+        # LEVEL 3
+        #
+        # Smaller bold labels.
+        #
+        # Example:
+        #
+        # Topics
+        # ------------------------------------------------------
+
         if (
             bold
             and len(text) <= 80
@@ -853,16 +965,15 @@ class PDFParser(BaseParser):
         return None
 
     # ==========================================================
-    # HEADER / FOOTER CLEANUP
+    # HEADER / FOOTER / PAGE NUMBER CLEANUP
     # ==========================================================
 
     def _is_noise(
         self,
         block: dict,
     ) -> bool:
-
-        # Never apply header/footer rules to
-        # detected tables.
+        # Tables should never be filtered using text-based
+        # header/footer rules.
         if (
             block.get("kind")
             == "table"
@@ -899,37 +1010,56 @@ class PDFParser(BaseParser):
             else 0
         )
 
+        # ------------------------------------------------------
+        # RULE 1
         # Standalone page number
+        #
+        # Examples:
+        #
+        # 1
+        # 10
+        # iii
+        # iv
+        # ------------------------------------------------------
+
         if (
             PAGE_NUMBER_PATTERN
             .fullmatch(text)
-
             and y0
             > page_height * 0.85
         ):
             return True
 
+        # ------------------------------------------------------
+        # RULE 2
         # Small page header
+        # ------------------------------------------------------
+
         if (
             y1
             < page_height * 0.07
-
             and font_size
             <= 9.5
-
             and len(text)
             <= 150
         ):
             return True
 
+        # ------------------------------------------------------
+        # RULE 3
         # Small page footer
+        #
+        # Examples:
+        #
+        # Infrastructure Security 4
+        # Monitoring and Logging 6
+        # ------------------------------------------------------
+
         if (
             y0
             > page_height * 0.90
-
             and font_size
             <= 9.5
-
             and len(text)
             <= 150
         ):

@@ -148,7 +148,7 @@ async def ingest_document(
 
         document.status = "parsed"
 
-        document.parser_version = "1.2"
+        document.parser_version = "1.3"
 
         document.extra_data = {
             **document.extra_data,
