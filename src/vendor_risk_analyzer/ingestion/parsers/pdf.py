@@ -1,3 +1,4 @@
+import re
 from statistics import median
 
 import pymupdf
@@ -5,6 +6,12 @@ import pymupdf
 from vendor_risk_analyzer.ingestion.parsers.base import (
     BaseParser,
     ParsedElement,
+)
+
+
+PAGE_NUMBER_PATTERN = re.compile(
+    r"^(?:\d+|[ivxlcdm]+)$",
+    re.IGNORECASE,
 )
 
 
@@ -22,37 +29,40 @@ class PDFParser(BaseParser):
         )
 
         try:
-            raw_blocks = []
+            raw_blocks: list[dict] = []
 
-            # ------------------------------------------------
-            # First pass:
-            # collect text blocks and font information
-            # ------------------------------------------------
+            # ==================================================
+            # PASS 1
+            # Extract text blocks + layout information
+            # ==================================================
 
             for page_index, page in enumerate(
                 document
             ):
-                page_dict = page.get_text(
-                    "dict"
+                page_dict = page.get_text("dict")
+
+                page_height = float(
+                    page.rect.height
                 )
 
                 for block in page_dict.get(
                     "blocks",
                     [],
                 ):
-                    # type 0 = text
+                    # type 0 = text block
                     if block.get("type") != 0:
                         continue
 
-                    lines = []
-                    font_sizes = []
+                    lines: list[str] = []
+                    font_sizes: list[float] = []
+
                     bold_detected = False
 
                     for line in block.get(
                         "lines",
                         [],
                     ):
-                        line_parts = []
+                        line_parts: list[str] = []
 
                         for span in line.get(
                             "spans",
@@ -67,13 +77,9 @@ class PDFParser(BaseParser):
                             if not text:
                                 continue
 
-                            line_parts.append(
-                                text
-                            )
+                            line_parts.append(text)
 
-                            size = span.get(
-                                "size"
-                            )
+                            size = span.get("size")
 
                             if size:
                                 font_sizes.append(
@@ -88,14 +94,10 @@ class PDFParser(BaseParser):
 
                             if (
                                 "bold" in font_name
-                                or "black"
-                                in font_name
-                                or "semibold"
-                                in font_name
+                                or "black" in font_name
+                                or "semibold" in font_name
                             ):
-                                bold_detected = (
-                                    True
-                                )
+                                bold_detected = True
 
                         line_text = " ".join(
                             line_parts
@@ -113,28 +115,51 @@ class PDFParser(BaseParser):
                     if not text:
                         continue
 
+                    bbox = block.get("bbox")
+
                     raw_blocks.append(
                         {
                             "text": text,
                             "page_number":
                                 page_index + 1,
+                            "page_height":
+                                page_height,
                             "font_sizes":
                                 font_sizes,
                             "bold":
                                 bold_detected,
                             "bbox":
-                                block.get("bbox"),
+                                bbox,
                         }
                     )
 
 
-            # ------------------------------------------------
-            # Determine approximate normal body font size
-            # ------------------------------------------------
+            # ==================================================
+            # PASS 2
+            # Remove obvious PDF noise
+            # ==================================================
 
-            all_font_sizes = []
+            cleaned_blocks: list[dict] = []
 
             for block in raw_blocks:
+                if self._is_noise(block):
+                    continue
+
+                cleaned_blocks.append(
+                    block
+                )
+
+
+            # ==================================================
+            # Determine normal body font size
+            #
+            # Important:
+            # calculate this AFTER removing headers/footers.
+            # ==================================================
+
+            all_font_sizes: list[float] = []
+
+            for block in cleaned_blocks:
                 all_font_sizes.extend(
                     block["font_sizes"]
                 )
@@ -146,48 +171,44 @@ class PDFParser(BaseParser):
             )
 
 
-            # ------------------------------------------------
-            # Second pass:
-            # convert PDF blocks into ParsedElement objects
-            # ------------------------------------------------
+            # ==================================================
+            # PASS 3
+            # Convert blocks → ParsedElement
+            # ==================================================
 
             elements: list[
                 ParsedElement
             ] = []
 
-            current_heading: str | None = (
-                None
-            )
+            current_heading: str | None = None
 
-            for block in raw_blocks:
+            for block in cleaned_blocks:
                 text = block["text"]
 
                 block_font_size = (
-                    max(
-                        block["font_sizes"]
-                    )
-                    if block[
-                        "font_sizes"
-                    ]
+                    max(block["font_sizes"])
+                    if block["font_sizes"]
                     else body_font_size
                 )
 
-                # Basic heading heuristic.
-                #
-                # Large/short text is likely a heading.
-                # Bold short text may also be a heading.
+
+                # ----------------------------------------------
+                # Heading heuristic
+                # ----------------------------------------------
 
                 looks_like_heading = (
                     len(text) <= 120
                     and (
                         block_font_size
                         >= body_font_size * 1.25
+
                         or (
                             block["bold"]
                             and len(text) <= 80
                         )
                     )
                 )
+
 
                 if looks_like_heading:
                     current_heading = text
@@ -237,6 +258,7 @@ class PDFParser(BaseParser):
                     else []
                 )
 
+
                 elements.append(
                     ParsedElement(
                         element_type=
@@ -267,7 +289,90 @@ class PDFParser(BaseParser):
                     )
                 )
 
+
             return elements
 
         finally:
             document.close()
+
+
+    # ==========================================================
+    # Noise detection
+    # ==========================================================
+
+    def _is_noise(
+        self,
+        block: dict,
+    ) -> bool:
+
+        text = block["text"].strip()
+
+        bbox = block.get("bbox")
+
+        if not bbox:
+            return False
+
+        _, y0, _, y1 = bbox
+
+        page_height = block[
+            "page_height"
+        ]
+
+        font_size = (
+            max(block["font_sizes"])
+            if block["font_sizes"]
+            else 0
+        )
+
+
+        # ------------------------------------------------------
+        # 1. Standalone page numbers
+        #
+        # Examples:
+        # 2
+        # 11
+        # iii
+        # iv
+        # ------------------------------------------------------
+
+        if (
+            PAGE_NUMBER_PATTERN.fullmatch(
+                text
+            )
+            and y0 > page_height * 0.85
+        ):
+            return True
+
+
+        # ------------------------------------------------------
+        # 2. Small text at very top of page
+        #
+        # Example:
+        # Introduction to AWS Security AWS Whitepaper
+        # ------------------------------------------------------
+
+        if (
+            y1 < 45
+            and font_size <= 9.5
+            and len(text) <= 150
+        ):
+            return True
+
+
+        # ------------------------------------------------------
+        # 3. Small footer text
+        #
+        # Examples:
+        # Infrastructure Security 4
+        # Data Encryption 5
+        # ------------------------------------------------------
+
+        if (
+            y0 > page_height - 45
+            and font_size <= 9.5
+            and len(text) <= 150
+        ):
+            return True
+
+
+        return False
