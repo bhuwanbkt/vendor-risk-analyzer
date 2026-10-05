@@ -2,11 +2,39 @@ from dataclasses import (
     dataclass,
     field,
 )
+import re
 from typing import Any
 
 from vendor_risk_analyzer.ingestion.parsers.base import (
     ParsedElement,
 )
+
+
+# ==============================================================
+# RETRIEVAL-EXCLUDED NAVIGATION SECTIONS
+#
+# We still preserve these sections in document_elements.
+#
+# We simply do not create retrieval chunks from their content.
+#
+# This prevents queries such as:
+#
+#   "What encryption controls does the vendor provide?"
+#
+# from retrieving:
+#
+#   Data Encryption ............ 5
+#
+# from a Table of Contents instead of the real substantive
+# section.
+# ==============================================================
+
+NAVIGATION_SECTION_TITLES = {
+    "table of contents",
+    "contents",
+    "list of figures",
+    "list of tables",
+}
 
 
 @dataclass(slots=True)
@@ -24,6 +52,10 @@ class ParsedChunk:
     )
 
 
+# ==============================================================
+# MAIN CHUNKING FUNCTION
+# ==============================================================
+
 def create_chunks(
     elements: list[ParsedElement],
     max_chars: int = 1200,
@@ -31,9 +63,28 @@ def create_chunks(
     long_text_overlap_chars: int = 160,
 ) -> list[ParsedChunk]:
 
+    if max_chars <= 0:
+        raise ValueError(
+            "max_chars must be greater than 0"
+        )
+
+    if overlap_elements < 0:
+        raise ValueError(
+            "overlap_elements cannot be negative"
+        )
+
+    if long_text_overlap_chars < 0:
+        raise ValueError(
+            "long_text_overlap_chars cannot be negative"
+        )
+
     chunks: list[
         ParsedChunk
     ] = []
+
+    # ==========================================================
+    # CURRENT NORMAL TEXT CHUNK
+    # ==========================================================
 
     current_parts: list[
         str
@@ -60,24 +111,29 @@ def create_chunks(
         if not current_parts:
             return
 
+        content = (
+            "\n\n".join(
+                current_parts
+            )
+            .strip()
+        )
+
+        if not content:
+            return
+
         page_numbers = sorted(
             {
                 page
-
                 for page
                 in current_pages
-
-                if page
-                is not None
+                if page is not None
             }
         )
 
         chunks.append(
             ParsedChunk(
                 content=
-                    "\n\n".join(
-                        current_parts
-                    ),
+                    content,
 
                 source_sequences=
                     current_sequences.copy(),
@@ -99,7 +155,7 @@ def create_chunks(
         )
 
     # ==========================================================
-    # CLEAR CURRENT CHUNK
+    # CLEAR CURRENT TEXT STATE
     # ==========================================================
 
     def clear_current() -> None:
@@ -109,7 +165,7 @@ def create_chunks(
         current_pages.clear()
 
     # ==========================================================
-    # PROCESS ELEMENTS
+    # PROCESS DOCUMENT ELEMENTS
     # ==========================================================
 
     for (
@@ -122,8 +178,10 @@ def create_chunks(
         # ======================================================
         # HEADING
         #
-        # Heading itself is metadata/context.
-        # It is not embedded as a separate retrieval chunk.
+        # Headings are used as retrieval metadata/context.
+        #
+        # We do not create standalone chunks containing only
+        # headings.
         # ======================================================
 
         if (
@@ -131,9 +189,15 @@ def create_chunks(
             == "heading"
         ):
 
+            # Finish text belonging to the previous section.
             save_text_chunk()
             clear_current()
 
+            # Keep current hierarchy even if this heading belongs
+            # to a navigation section.
+            #
+            # That way following TOC paragraphs are recognized
+            # as navigation content and skipped.
             current_heading_path[:] = (
                 element.heading_path
             )
@@ -141,15 +205,49 @@ def create_chunks(
             continue
 
         # ======================================================
+        # NAVIGATION CONTENT
+        #
+        # Examples:
+        #
+        # Table of Contents
+        # Contents
+        # List of Figures
+        # List of Tables
+        #
+        # IMPORTANT:
+        #
+        # The elements remain stored in document_elements.
+        #
+        # We only prevent them from becoming retrieval chunks.
+        # ======================================================
+
+        if _is_navigation_element(
+            element
+        ):
+
+            # A navigation block must never accidentally combine
+            # with substantive content accumulated before it.
+            save_text_chunk()
+            clear_current()
+
+            if element.heading_path:
+
+                current_heading_path[:] = (
+                    element.heading_path
+                )
+
+            continue
+
+        # ======================================================
         # CAPTION
         #
-        # Captions stay in document_elements.
+        # Captions remain preserved in document_elements.
         #
-        # Table captions are also copied into table metadata by
-        # PDFParser and are therefore included in table chunks.
+        # Figure captions are not currently embedded by
+        # themselves.
         #
-        # Figure captions are not useful enough by themselves
-        # to become retrieval chunks.
+        # Table captions are copied into table metadata by the
+        # parser and prepended to the corresponding table chunk.
         # ======================================================
 
         if (
@@ -164,9 +262,13 @@ def create_chunks(
         #
         # Tables remain semantic units.
         #
-        # They intentionally do NOT use the 1200-character text
-        # limit because splitting arbitrary table rows can destroy
-        # column relationships.
+        # We intentionally do NOT force tables through the
+        # 1200-character ordinary-text limit because arbitrary
+        # splitting may destroy row/column relationships.
+        #
+        # Later, before embeddings, we can add semantic row-group
+        # table splitting if real retrieval evaluation proves it
+        # necessary.
         # ======================================================
 
         if (
@@ -186,6 +288,23 @@ def create_chunks(
                 current_heading_path.copy()
             )
 
+            # --------------------------------------------------
+            # Additional safety:
+            #
+            # Do not create table retrieval chunks if a table is
+            # inside navigation material.
+            # --------------------------------------------------
+
+            if _is_navigation_heading_path(
+                table_heading_path
+            ):
+
+                current_heading_path[:] = (
+                    table_heading_path
+                )
+
+                continue
+
             caption = (
                 element.metadata.get(
                     "caption"
@@ -193,16 +312,36 @@ def create_chunks(
             )
 
             table_content = (
-                element.content
+                element.content.strip()
             )
 
+            # Include a real table caption in the retrieval text.
+            #
+            # Example:
+            #
+            # Table 1. CSF 2.0 Core Function...
+            #
+            # | Function | Category | ...
+            #
             if caption:
 
-                table_content = (
-                    f"{caption}"
-                    "\n\n"
-                    f"{table_content}"
+                normalized_caption = (
+                    str(
+                        caption
+                    )
+                    .strip()
                 )
+
+                if normalized_caption:
+
+                    table_content = (
+                        f"{normalized_caption}"
+                        "\n\n"
+                        f"{table_content}"
+                    )
+
+            if not table_content:
+                continue
 
             chunks.append(
                 ParsedChunk(
@@ -238,7 +377,11 @@ def create_chunks(
             continue
 
         # ======================================================
-        # NORMAL TEXT
+        # NORMAL TEXT-LIKE ELEMENT
+        #
+        # paragraph
+        # list_item
+        # etc.
         # ======================================================
 
         text = (
@@ -250,24 +393,50 @@ def create_chunks(
         if not text:
             continue
 
+        # Use the element's own hierarchy when available.
         if element.heading_path:
 
             current_heading_path[:] = (
                 element.heading_path
             )
 
-        # ======================================================
-        # ONE SOURCE ELEMENT IS ITSELF > max_chars
+        # ------------------------------------------------------
+        # Extra navigation guard.
         #
-        # This fixes the AWS Table-of-Contents case where one
-        # 1620-character element bypassed the old chunk limit.
+        # This also handles any future parser element type that
+        # falls inside a navigation section.
+        # ------------------------------------------------------
+
+        if _is_navigation_heading_path(
+            current_heading_path
+        ):
+
+            save_text_chunk()
+            clear_current()
+
+            continue
+
+        # ======================================================
+        # SINGLE SOURCE ELEMENT > max_chars
+        #
+        # Example:
+        #
+        # AWS Table of Contents previously contained a single
+        # 1600+ character source element.
+        #
+        # Although TOCs are now excluded, this logic is still
+        # necessary for legitimate oversized paragraphs in
+        # arbitrary vendor documents.
         # ======================================================
 
         if (
-            len(text)
+            len(
+                text
+            )
             > max_chars
         ):
 
+            # Save any previous normal chunk first.
             save_text_chunk()
             clear_current()
 
@@ -295,6 +464,9 @@ def create_chunks(
                 start=1,
             ):
 
+                if not part:
+                    continue
+
                 chunks.append(
                     ParsedChunk(
                         content=
@@ -311,6 +483,9 @@ def create_chunks(
                             "element_type":
                                 "text",
 
+                            # Element overlap is not used because
+                            # this chunk came from one source
+                            # element.
                             "overlap_elements":
                                 0,
 
@@ -356,14 +531,36 @@ def create_chunks(
             )
         )
 
+        # Adding this element would exceed max_chars.
         if (
             current_parts
+
             and
-            len(candidate)
+            len(
+                candidate
+            )
             > max_chars
         ):
 
+            # Store the current chunk.
             save_text_chunk()
+
+            # --------------------------------------------------
+            # Preserve element-level overlap.
+            #
+            # Example:
+            #
+            # Chunk A:
+            #   P1
+            #   P2
+            #   P3
+            #
+            # Chunk B:
+            #   P3
+            #   P4
+            #
+            # if overlap_elements = 1.
+            # --------------------------------------------------
 
             overlap_parts = (
                 current_parts[
@@ -402,6 +599,8 @@ def create_chunks(
                 )
             )
 
+            # Only keep the overlap if the overlap plus new text
+            # itself still fits.
             if (
                 overlap_parts
 
@@ -428,6 +627,7 @@ def create_chunks(
 
                 clear_current()
 
+        # Add the new element.
         current_parts.append(
             text
         )
@@ -440,9 +640,146 @@ def create_chunks(
             element.page_number
         )
 
+    # ==========================================================
+    # SAVE FINAL TEXT CHUNK
+    # ==========================================================
+
     save_text_chunk()
 
     return chunks
+
+
+# ==============================================================
+# NAVIGATION SECTION DETECTION
+# ==============================================================
+
+def _is_navigation_element(
+    element: ParsedElement,
+) -> bool:
+    """
+    Return True when an element belongs to navigation-only
+    document content.
+
+    We check both:
+
+    - heading_path
+    - section_title
+
+    because different parsers may populate structure slightly
+    differently.
+
+    The original element is NEVER deleted. This function only
+    controls whether it becomes retrieval content.
+    """
+
+    if _is_navigation_heading_path(
+        element.heading_path
+    ):
+        return True
+
+    if element.section_title:
+
+        normalized_section = (
+            _normalize_section_title(
+                element.section_title
+            )
+        )
+
+        if (
+            normalized_section
+            in NAVIGATION_SECTION_TITLES
+        ):
+            return True
+
+    return False
+
+
+def _is_navigation_heading_path(
+    heading_path: list[str],
+) -> bool:
+    """
+    Check every level in a heading hierarchy.
+
+    Examples:
+
+        ["Table of Contents"]
+
+        [
+            "Framework (CSF) 2.0",
+            "Table of Contents",
+        ]
+
+        [
+            "Framework (CSF) 2.0",
+            "List of Figures",
+        ]
+
+    All should be excluded from retrieval.
+    """
+
+    for heading in heading_path:
+
+        normalized_heading = (
+            _normalize_section_title(
+                heading
+            )
+        )
+
+        if (
+            normalized_heading
+            in NAVIGATION_SECTION_TITLES
+        ):
+            return True
+
+    return False
+
+
+def _normalize_section_title(
+    value: str,
+) -> str:
+    """
+    Normalize structural labels for reliable comparison.
+
+    Examples:
+
+        " Table   of Contents "
+            ->
+        "table of contents"
+
+        "LIST OF FIGURES"
+            ->
+        "list of figures"
+    """
+
+    value = (
+        str(
+            value
+        )
+        .strip()
+        .casefold()
+    )
+
+    value = re.sub(
+        r"\s+",
+        " ",
+        value,
+    )
+
+    # Remove simple trailing punctuation only.
+    #
+    # This allows:
+    #
+    #   Table of Contents:
+    #
+    # to match:
+    #
+    #   table of contents
+    #
+    value = value.rstrip(
+        " :.-–—"
+    )
+
+    return value
 
 
 # ==============================================================
@@ -455,8 +792,26 @@ def _split_long_text(
     max_chars: int,
     overlap_chars: int,
 ) -> list[str]:
+    """
+    Split a single source element that is larger than max_chars.
 
-    text = text.strip()
+    Preference order for split boundaries:
+
+    - paragraph boundary
+    - newline
+    - sentence ending
+    - semicolon
+    - comma
+    - whitespace
+    - hard character boundary
+
+    A small character overlap is preserved between adjacent
+    pieces.
+    """
+
+    text = (
+        text.strip()
+    )
 
     if not text:
         return []
@@ -467,8 +822,7 @@ def _split_long_text(
             "max_chars must be greater than 0"
         )
 
-    # Keep the overlap reasonable even if someone supplies a
-    # very large overlap value.
+    # Keep overlap within a safe fraction of the chunk.
     overlap_chars = max(
         0,
         min(
@@ -477,7 +831,12 @@ def _split_long_text(
         ),
     )
 
-    if len(text) <= max_chars:
+    if (
+        len(
+            text
+        )
+        <= max_chars
+    ):
         return [
             text
         ]
@@ -488,7 +847,9 @@ def _split_long_text(
 
     start = 0
 
-    # Prefer a natural break in the final 40% of the window.
+    # We do not want to split extremely early in each window.
+    #
+    # Prefer a boundary in the final 40%.
     minimum_break_distance = max(
         1,
         int(
@@ -497,16 +858,28 @@ def _split_long_text(
         ),
     )
 
-    while start < len(text):
+    while (
+        start
+        < len(
+            text
+        )
+    ):
 
         hard_end = min(
-            start + max_chars,
-            len(text),
+            start
+            + max_chars,
+
+            len(
+                text
+            ),
         )
 
+        # Last piece.
         if (
             hard_end
-            >= len(text)
+            >= len(
+                text
+            )
         ):
 
             end = len(
@@ -526,13 +899,20 @@ def _split_long_text(
                 int
             ] = []
 
-            # Stronger boundaries first conceptually, but we
-            # choose the latest safe break so chunks remain close
+            # --------------------------------------------------
+            # Look for a natural boundary.
+            #
+            # We gather available candidates and select the
+            # latest safe boundary so the chunk remains close
             # to max_chars.
+            # --------------------------------------------------
+
             for separator in (
                 "\n\n",
                 "\n",
                 ". ",
+                "? ",
+                "! ",
                 "; ",
                 ", ",
                 " ",
@@ -577,25 +957,50 @@ def _split_long_text(
 
         if piece:
 
-            pieces.append(
-                piece
-            )
+            # Final defensive guarantee.
+            #
+            # This should normally already be <= max_chars.
+            if (
+                len(
+                    piece
+                )
+                <= max_chars
+            ):
+
+                pieces.append(
+                    piece
+                )
+
+            else:
+
+                # Extremely defensive fallback.
+                pieces.append(
+                    piece[
+                        :max_chars
+                    ]
+                    .strip()
+                )
 
         if (
             end
-            >= len(text)
+            >= len(
+                text
+            )
         ):
 
             break
 
-        # Character overlap for a single large source element.
+        # ------------------------------------------------------
+        # CHARACTER OVERLAP
+        # ------------------------------------------------------
+
         next_start = max(
             start + 1,
             end
             - overlap_chars,
         )
 
-        # Avoid starting in the middle of a word.
+        # Try not to start inside a word.
         while (
             next_start
             < end
@@ -608,9 +1013,12 @@ def _split_long_text(
 
             next_start += 1
 
+        # Skip whitespace before the new piece.
         while (
             next_start
-            < len(text)
+            < len(
+                text
+            )
 
             and
             text[
