@@ -13,6 +13,22 @@
             <h1>Vendor Risk Analyzer</h1>
             <p>AI-powered vendor security and compliance assessment</p>
         </div>
+        <div>
+            {% if user %}
+                <span>
+                    Signed in as
+                    <strong>{{ user.name or user.email }}</strong>
+                </span>
+
+                <a href="/auth/logout">
+                    Logout
+                </a>
+            {% else %}
+                <a href="/auth/login">
+                    Sign in
+                </a>
+            {% endif %}
+        </div>
 
         <span class="status">
             ● Service Online

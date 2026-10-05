@@ -5,8 +5,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "Vendor Risk Analyzer"
-    database_url: str
+    app_env: str = "development"
     log_level: str = "INFO"
+
+    database_url: str
+
+    zitadel_issuer: str
+    zitadel_client_id: str
+    zitadel_redirect_uri: str
+    zitadel_post_logout_uri: str
+
+    session_secret: str
 
     model_config = SettingsConfigDict(
         env_file=".env",

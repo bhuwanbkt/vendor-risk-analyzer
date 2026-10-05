@@ -7,8 +7,15 @@ from fastapi.templating import Jinja2Templates
 
 from vendor_risk_analyzer.api.health import router as health_router
 
+from starlette.middleware.sessions import SessionMiddleware
+
+from vendor_risk_analyzer.auth.routes import router as auth_router
+from vendor_risk_analyzer.config import get_settings
+
 
 BASE_DIR = Path(__file__).resolve().parent
+
+settings = get_settings()
 
 app = FastAPI(
     title="Vendor Risk Analyzer",
@@ -19,7 +26,17 @@ app = FastAPI(
     openapi_url=None,
 )
 
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.session_secret,
+    session_cookie="vendor_risk_session",
+    max_age=3600,
+    same_site="lax",
+    https_only=True,
+)
+
 app.include_router(health_router)
+app.include_router(auth_router)
 
 app.mount(
     "/static",
@@ -34,10 +51,13 @@ templates = Jinja2Templates(
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
+    user = request.session.get("user")
+
     return templates.TemplateResponse(
         request=request,
         name="index.html",
         context={
             "app_name": "Vendor Risk Analyzer",
+            "user": user,
         },
     )
