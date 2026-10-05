@@ -586,48 +586,72 @@ async function loadDocuments(vendorId) {
         }
 
 
-        for (const doc of documents) {
-            const item =
-                window.document.createElement(
-                    "div"
-                );
+    for (const doc of documents) {
+        const item =
+            window.document.createElement("div");
 
-            item.className =
-                "document-item";
+        item.className = "document-item";
 
+        const fileSize =
+            formatFileSize(doc.size_bytes);
 
-            const fileSize =
-                formatFileSize(
-                    doc.size_bytes
-                );
+        let actionButton = "";
 
+        if (
+            documentForm &&
+            (
+                doc.status === "uploaded" ||
+                doc.status === "failed" ||
+                doc.status === "parsed"
+            )
+        ) {
+            const buttonText =
+                doc.status === "parsed"
+                    ? "Re-parse"
+                    : "Parse";
 
-            item.innerHTML = `
-                <div>
-                    <strong>
-                        ${escapeHtml(doc.filename)}
-                    </strong>
+            actionButton = `
+                <button
+                    type="button"
+                    class="ingest-button"
+                    data-document-id="${escapeHtml(doc.id)}"
+                    data-vendor-id="${escapeHtml(doc.vendor_id)}"
+                >
+                    ${buttonText}
+                </button>
+            `;
+        }
 
-                    <div class="document-details">
-                        ${escapeHtml(
-                            doc.file_type.toUpperCase()
-                        )}
+        item.innerHTML = `
+            <div>
+                <strong>
+                    ${escapeHtml(doc.filename)}
+                </strong>
 
-                        ${
-                            fileSize
-                                ? ` • ${escapeHtml(fileSize)}`
-                                : ""
-                        }
-                    </div>
+                <div class="document-details">
+                    ${escapeHtml(
+                        doc.file_type.toUpperCase()
+                    )}
+
+                    ${
+                        fileSize
+                            ? ` • ${escapeHtml(fileSize)}`
+                            : ""
+                    }
                 </div>
+            </div>
 
+            <div class="document-actions">
                 <span class="document-status">
                     ${escapeHtml(doc.status)}
                 </span>
-            `;
 
-            documentList.appendChild(item);
-        }
+                ${actionButton}
+            </div>
+        `;
+
+        documentList.appendChild(item);
+    }
 
     } catch (error) {
         console.error(
@@ -640,6 +664,105 @@ async function loadDocuments(vendorId) {
     }
 }
 
+// ------------------------------------------------------------
+// Ingest Document
+// ------------------------------------------------------------
+
+async function ingestDocument(
+    vendorId,
+    documentId,
+    button
+) {
+    if (!documentForm) {
+        return;
+    }
+
+    const csrfToken =
+        documentForm.dataset.csrfToken;
+
+    const originalText =
+        button.textContent;
+
+    button.disabled = true;
+    button.textContent = "Parsing...";
+
+    documentMessage.textContent =
+        "Parsing document...";
+
+    try {
+        const response = await fetch(
+            `/api/vendors/${vendorId}/documents/${documentId}/ingest`,
+            {
+                method: "POST",
+
+                credentials: "same-origin",
+
+                headers: {
+                    "X-CSRF-Token":
+                        csrfToken,
+                },
+            }
+        );
+
+        const body =
+            await response.json();
+
+        if (!response.ok) {
+            throw new Error(
+                body.detail ||
+                "Document ingestion failed"
+            );
+        }
+
+        documentMessage.textContent =
+            "Document parsed successfully.";
+
+        await loadDocuments(
+            vendorId
+        );
+
+    } catch (error) {
+        console.error(
+            "Document ingestion failed:",
+            error
+        );
+
+        documentMessage.textContent =
+            error.message;
+
+        button.disabled = false;
+        button.textContent =
+            originalText;
+    }
+}
+
+if (documentList) {
+    documentList.addEventListener(
+        "click",
+        async (event) => {
+            const button =
+                event.target.closest(
+                    ".ingest-button"
+                );
+
+            if (!button) {
+                return;
+            }
+
+            const vendorId =
+                button.dataset.vendorId;
+
+            const documentId =
+                button.dataset.documentId;
+
+            await ingestDocument(
+                vendorId,
+                documentId,
+                button
+            );
+        }
+    );
+}
 
 // ------------------------------------------------------------
 // DOCUMENT VENDOR SELECT

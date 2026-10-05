@@ -198,3 +198,31 @@ body {
     padding: 16px 0;
     border-bottom: 1px solid #e5e7eb;
 }
+
+.document-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.ingest-button {
+    padding: 7px 12px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.ingest-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.document-status {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.document-details {
+    margin-top: 5px;
+    font-size: 14px;
+}
