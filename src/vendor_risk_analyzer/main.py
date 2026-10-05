@@ -12,6 +12,12 @@ from starlette.middleware.sessions import SessionMiddleware
 from vendor_risk_analyzer.auth.routes import router as auth_router
 from vendor_risk_analyzer.config import get_settings
 
+from vendor_risk_analyzer.api.vendors import (
+    router as vendors_router,
+)
+
+
+
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -35,8 +41,10 @@ app.add_middleware(
     https_only=True,
 )
 
+# Register routes here
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(vendors_router)
 
 app.mount(
     "/static",

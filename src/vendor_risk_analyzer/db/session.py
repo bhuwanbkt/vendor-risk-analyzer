@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from collections.abc import AsyncGenerator
+
 from vendor_risk_analyzer.config import get_settings
 
 
@@ -58,3 +60,7 @@ AsyncSessionLocal = async_sessionmaker(
 async def check_database() -> None:
     async with engine.connect() as connection:
         await connection.execute(text("SELECT 1"))
+
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionLocal() as session:
+        yield session
