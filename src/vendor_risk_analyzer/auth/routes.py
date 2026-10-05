@@ -63,8 +63,25 @@ async def callback(request: Request):
             detail="Unable to retrieve user information",
         )
 
+    # User information returned by ZITADEL
     user = response.json()
 
+    # Find this project's ZITADEL role claim
+    role_claim = (
+        "urn:zitadel:iam:org:project:"
+        f"{settings.zitadel_project_id}:roles"
+    )
+
+    role_data = user.get(
+        role_claim,
+        {},
+    )
+
+    roles = list(
+        role_data.keys()
+    )
+
+    # Create our application's session
     request.session["user"] = {
         "sub": user.get("sub"),
         "name": user.get("name"),
@@ -72,6 +89,7 @@ async def callback(request: Request):
         "preferred_username": user.get(
             "preferred_username"
         ),
+        "roles": roles,
     }
 
     return RedirectResponse(

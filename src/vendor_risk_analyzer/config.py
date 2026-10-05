@@ -12,6 +12,7 @@ class Settings(BaseSettings):
 
     zitadel_issuer: str
     zitadel_client_id: str
+    zitadel_project_id: str
     zitadel_redirect_uri: str
     zitadel_post_logout_uri: str
 
