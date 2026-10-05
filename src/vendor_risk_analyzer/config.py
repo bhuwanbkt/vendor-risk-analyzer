@@ -18,6 +18,12 @@ class Settings(BaseSettings):
 
     session_secret: str
 
+    object_storage_endpoint: str
+    object_storage_region: str
+    object_storage_access_key_id: str
+    object_storage_secret_access_key: str
+    object_storage_bucket: str = "vendor-documents"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

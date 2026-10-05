@@ -16,6 +16,10 @@ from vendor_risk_analyzer.api.vendors import (
     router as vendors_router,
 )
 
+from vendor_risk_analyzer.api.documents import (
+    router as documents_router,
+)
+
 import secrets
 
 
@@ -45,6 +49,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(vendors_router)
+app.include_router(documents_router)
 
 app.mount(
     "/static",
