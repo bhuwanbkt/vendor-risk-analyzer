@@ -82,6 +82,80 @@
 
         </section>
 
+        {% if user %}
+
+        <section class="vendor-section">
+
+            <div class="section-header">
+                <div>
+                    <h2>Vendors</h2>
+                    <p>
+                        Vendors currently registered for risk assessment.
+                    </p>
+                </div>
+            </div>
+
+            {% if "admin" in user.roles or "analyst" in user.roles %}
+
+            <div class="vendor-form-card">
+
+                <h3>Add Vendor</h3>
+
+                <form
+                    id="vendor-form"
+                    data-csrf-token="{{ csrf_token }}"
+                >
+
+                    <label for="vendor-name">
+                        Vendor Name
+                    </label>
+
+                    <input
+                        id="vendor-name"
+                        name="name"
+                        type="text"
+                        maxlength="255"
+                        required
+                    >
+
+                    <label for="vendor-website">
+                        Website
+                    </label>
+
+                    <input
+                        id="vendor-website"
+                        name="website"
+                        type="url"
+                        maxlength="500"
+                        placeholder="https://example.com"
+                    >
+
+                    <button type="submit">
+                        Create Vendor
+                    </button>
+
+                    <p id="vendor-message"></p>
+
+                </form>
+
+            </div>
+
+            {% endif %}
+
+            <div class="vendor-list-card">
+
+                <h3>Registered Vendors</h3>
+
+                <div id="vendor-list">
+                    Loading vendors...
+                </div>
+
+            </div>
+
+        </section>
+
+        {% endif %}
+
         <section class="system">
             <h2>System Status</h2>
 
@@ -108,5 +182,6 @@
         </section>
 
     </main>
+<script src="/static/app.js"></script>
 </body>
 </html>

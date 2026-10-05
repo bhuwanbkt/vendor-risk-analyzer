@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from vendor_risk_analyzer.auth.dependencies import (
     require_roles,
+    verify_csrf,
 )
 from vendor_risk_analyzer.db.models import Vendor
 from vendor_risk_analyzer.db.session import get_db
@@ -63,6 +64,7 @@ async def create_vendor(
             "admin",
         )
     ),
+    _: None = Depends(verify_csrf),
 ):
     vendor = Vendor(
         name=payload.name.strip(),

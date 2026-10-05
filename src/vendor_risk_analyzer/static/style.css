@@ -106,3 +106,61 @@ body {
 .system-row:last-child {
     border-bottom: none;
 }
+
+.vendor-section {
+    margin-top: 40px;
+}
+
+.vendor-form-card,
+.vendor-list-card {
+    background: white;
+    border-radius: 10px;
+    padding: 24px;
+    margin-top: 20px;
+
+    box-shadow:
+        0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.vendor-form-card form {
+    display: grid;
+    gap: 12px;
+}
+
+.vendor-form-card input {
+    padding: 10px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+}
+
+.vendor-form-card button {
+    width: fit-content;
+    padding: 10px 18px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.vendor-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    padding: 16px 0;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.vendor-item:last-child {
+    border-bottom: none;
+}
+
+.vendor-website {
+    margin-top: 5px;
+    color: #6b7280;
+    font-size: 14px;
+}
+
+.vendor-status {
+    font-size: 14px;
+    font-weight: bold;
+}

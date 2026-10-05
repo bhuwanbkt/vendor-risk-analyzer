@@ -16,7 +16,7 @@ from vendor_risk_analyzer.api.vendors import (
     router as vendors_router,
 )
 
-
+import secrets
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -61,11 +61,20 @@ templates = Jinja2Templates(
 async def dashboard(request: Request):
     user = request.session.get("user")
 
+    csrf_token = request.session.get(
+        "csrf_token"
+    )
+
+    if user and not csrf_token:
+        csrf_token = secrets.token_urlsafe(32)
+        request.session["csrf_token"] = csrf_token
+
     return templates.TemplateResponse(
         request=request,
         name="index.html",
         context={
             "app_name": "Vendor Risk Analyzer",
             "user": user,
+            "csrf_token": csrf_token,
         },
     )
