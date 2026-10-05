@@ -1,8 +1,5 @@
 from collections import defaultdict
-from dataclasses import (
-    dataclass,
-    field,
-)
+from dataclasses import dataclass, field
 import re
 from typing import Any
 
@@ -12,29 +9,17 @@ from vendor_risk_analyzer.ingestion.parsers.base import (
 
 
 # ==============================================================
-# NAVIGATION DETECTION
+# STRONG NAVIGATION HEADING HINTS
+#
+# These headings strongly suggest that neighboring content may
+# be navigation.
 #
 # IMPORTANT:
 #
-# We intentionally keep this list small.
+# They do NOT automatically cause all child elements to be
+# excluded from retrieval.
 #
-# We DO NOT put things such as:
-#
-#   Preface
-#   Foreword
-#   Appendix
-#   Glossary
-#   References
-#   Executive Summary
-#   Notices
-#   Compliance
-#   Security Addendum
-#   Privacy Addendum
-#
-# here because those sections can contain important vendor-risk
-# evidence.
-#
-# These are only very strong navigation hints.
+# Each child element is still evaluated independently.
 # ==============================================================
 
 STRONG_NAVIGATION_TITLES = {
@@ -56,9 +41,9 @@ STRONG_NAVIGATION_TITLES = {
 
 # Examples:
 #
-# Security Controls ........................ 12
-# Appendix A ............................... 24
-# Preface .................................. iv
+# Security Controls .................... 12
+# Appendix A ........................... 24
+# Preface .............................. iv
 #
 DOT_LEADER_PAGE_REFERENCE_PATTERN = re.compile(
     r"\.{3,}"
@@ -74,9 +59,6 @@ DOT_LEADER_PAGE_REFERENCE_PATTERN = re.compile(
 # 1 Introduction 3
 # 2 Security Architecture 5
 # 2.1 Encryption 7
-#
-# This is intentionally conservative and is only trusted when
-# several similar entries occur in the same section/page.
 #
 NUMBERED_PAGE_REFERENCE_PATTERN = re.compile(
     r"^"
@@ -113,13 +95,12 @@ FIGURE_TABLE_PAGE_REFERENCE_PATTERN = re.compile(
 )
 
 
-# Generic short title followed by a page number.
-#
-# Example:
+# Weak signal:
 #
 # Security Architecture 8
+# Preface iv
 #
-# This is weak evidence and is NEVER enough by itself.
+# Never trusted by itself.
 #
 SHORT_TITLE_PAGE_REFERENCE_PATTERN = re.compile(
     r"^"
@@ -180,21 +161,16 @@ def create_chunks(
         )
 
     # ==========================================================
-    # FIRST:
+    # Analyze navigation before chunking.
     #
-    # Analyze the full document before chunking it.
+    # Returns:
     #
-    # We need document-level / section-level context to decide
-    # whether content is navigation.
+    # {
+    #     element_sequence: exclusion_reason
+    # }
     #
-    # A single line such as:
-    #
-    #   Security Architecture 8
-    #
-    # is NOT enough to discard content.
-    #
-    # But 10 similar page-reference lines in the same section
-    # strongly indicate navigation.
+    # Only the individual navigation-looking child elements are
+    # excluded.
     # ==========================================================
 
     navigation_exclusions = (
@@ -203,29 +179,19 @@ def create_chunks(
         )
     )
 
-    chunks: list[
-        ParsedChunk
-    ] = []
+    chunks: list[ParsedChunk] = []
 
-    current_parts: list[
-        str
-    ] = []
+    current_parts: list[str] = []
 
-    current_sequences: list[
-        int
-    ] = []
+    current_sequences: list[int] = []
 
-    current_pages: list[
-        int | None
-    ] = []
+    current_pages: list[int | None] = []
 
-    current_heading_path: list[
-        str
-    ] = []
+    current_heading_path: list[str] = []
 
     # ==========================================================
-    # SAVE CURRENT TEXT CHUNK
-    # ==========================================================
+    # SAVE CURRENT NORMAL TEXT CHUNK
+    # ==============================================================
 
     def save_text_chunk() -> None:
 
@@ -253,8 +219,7 @@ def create_chunks(
 
         chunks.append(
             ParsedChunk(
-                content=
-                    content,
+                content=content,
 
                 source_sequences=
                     current_sequences.copy(),
@@ -276,8 +241,8 @@ def create_chunks(
         )
 
     # ==========================================================
-    # CLEAR CURRENT CHUNK
-    # ==========================================================
+    # CLEAR CURRENT TEXT STATE
+    # ==============================================================
 
     def clear_current() -> None:
 
@@ -286,27 +251,21 @@ def create_chunks(
         current_pages.clear()
 
     # ==========================================================
-    # PROCESS DOCUMENT ELEMENTS
-    # ==========================================================
+    # PROCESS ELEMENTS
+    # ==============================================================
 
-    for (
-        sequence,
-        element,
-    ) in enumerate(
+    for sequence, element in enumerate(
         elements
     ):
 
         # ======================================================
         # HEADING
         #
-        # Headings do not create standalone retrieval chunks.
-        # They provide structural context.
+        # Headings provide structural context.
+        # They do not become standalone retrieval chunks.
         # ======================================================
 
-        if (
-            element.element_type
-            == "heading"
-        ):
+        if element.element_type == "heading":
 
             save_text_chunk()
             clear_current()
@@ -318,17 +277,14 @@ def create_chunks(
             continue
 
         # ======================================================
-        # NAVIGATION CONTENT
+        # NAVIGATION CHILD ELEMENT
         #
-        # Keep it in document_elements.
+        # The original element remains in document_elements.
         #
-        # Do NOT put it in document_chunks.
+        # Only retrieval chunk creation is skipped.
         # ======================================================
 
-        if (
-            sequence
-            in navigation_exclusions
-        ):
+        if sequence in navigation_exclusions:
 
             save_text_chunk()
             clear_current()
@@ -344,32 +300,20 @@ def create_chunks(
         # ======================================================
         # CAPTION
         #
-        # Figure captions remain available in document_elements.
+        # Figure captions stay in document_elements.
         #
-        # Table captions are already attached to table metadata
-        # by the PDF parser.
+        # Table captions are attached to the table metadata by
+        # the parser and later prepended to the table chunk.
         # ======================================================
 
-        if (
-            element.element_type
-            == "caption"
-        ):
-
+        if element.element_type == "caption":
             continue
 
         # ======================================================
         # TABLE
-        #
-        # Tables remain semantic units.
-        #
-        # Do not arbitrarily split them at max_chars because that
-        # can destroy row/column relationships.
         # ======================================================
 
-        if (
-            element.element_type
-            == "table"
-        ):
+        if element.element_type == "table":
 
             save_text_chunk()
             clear_current()
@@ -469,12 +413,7 @@ def create_chunks(
         # SINGLE SOURCE ELEMENT > max_chars
         # ======================================================
 
-        if (
-            len(
-                text
-            )
-            > max_chars
-        ):
+        if len(text) > max_chars:
 
             save_text_chunk()
             clear_current()
@@ -495,10 +434,7 @@ def create_chunks(
                 parts
             )
 
-            for (
-                part_index,
-                part,
-            ) in enumerate(
+            for part_index, part in enumerate(
                 parts,
                 start=1,
             ):
@@ -569,19 +505,11 @@ def create_chunks(
 
         if (
             current_parts
-
             and
-            len(
-                candidate
-            )
-            > max_chars
+            len(candidate) > max_chars
         ):
 
             save_text_chunk()
-
-            # --------------------------------------------------
-            # Preserve element-level overlap.
-            # --------------------------------------------------
 
             overlap_parts = (
                 current_parts[
@@ -622,7 +550,6 @@ def create_chunks(
 
             if (
                 overlap_parts
-
                 and
                 len(
                     overlap_candidate
@@ -658,17 +585,13 @@ def create_chunks(
             element.page_number
         )
 
-    # ==========================================================
-    # SAVE FINAL CHUNK
-    # ==========================================================
-
     save_text_chunk()
 
     return chunks
 
 
 # ==============================================================
-# NAVIGATION ANALYSIS
+# NAVIGATION DETECTION
 # ==============================================================
 
 
@@ -676,20 +599,31 @@ def _detect_navigation_elements(
     elements: list[ParsedElement],
 ) -> dict[int, str]:
     """
-    Analyze the entire document and return:
+    Detect navigation at the CHILD ELEMENT level.
 
-        {
-            element_sequence:
-                reason_for_retrieval_exclusion
-        }
+    Important behavior:
 
-    This is deliberately section-aware.
+        Table of Contents
+            Security ............ 4
+            Encryption .......... 7
 
-    We do NOT decide that content is navigation only because its
-    heading contains words such as "Appendix" or "Preface".
+            This document is historical.
+
+    Results:
+
+        Security ............ 4
+            -> excluded
+
+        Encryption .......... 7
+            -> excluded
+
+        This document is historical.
+            -> preserved
+
+    A navigation-looking heading is only a context signal.
     """
 
-    grouped_elements: dict[
+    groups: dict[
         tuple[str, ...],
         list[
             tuple[
@@ -702,24 +636,21 @@ def _detect_navigation_elements(
     )
 
     # ==========================================================
-    # GROUP ELEMENTS BY STRUCTURAL CONTEXT
-    # ==========================================================
+    # GROUP BY STRUCTURAL CONTEXT
+    # ======================================================
 
-    for (
-        sequence,
-        element,
-    ) in enumerate(
+    for sequence, element in enumerate(
         elements
     ):
 
-        context_key = (
+        key = (
             _navigation_context_key(
                 element
             )
         )
 
-        grouped_elements[
-            context_key
+        groups[
+            key
         ].append(
             (
                 sequence,
@@ -733,67 +664,290 @@ def _detect_navigation_elements(
     ] = {}
 
     # ==========================================================
-    # CLASSIFY EACH STRUCTURAL GROUP
-    # ==========================================================
+    # INSPECT EACH GROUP
+    # ======================================================
 
-    for (
-        context_key,
-        members,
-    ) in grouped_elements.items():
+    for context_key, members in (
+        groups.items()
+    ):
 
-        reason = (
-            _classify_navigation_group(
-                context_key=
-                    context_key,
-
-                members=
-                    members,
+        strong_navigation_context = (
+            _group_has_strong_navigation_title(
+                members
             )
         )
 
-        if reason is None:
-            continue
+        content_members = [
+            (
+                sequence,
+                element,
+            )
 
-        for (
-            sequence,
-            element,
-        ) in members:
+            for sequence, element
+            in members
 
-            # Headings never become retrieval chunks anyway.
             if (
                 element.element_type
-                == "heading"
-            ):
+                != "heading"
+
+                and
+                element.content.strip()
+            )
+        ]
+
+        if not content_members:
+            continue
+
+        scores = {
+            sequence:
+                _navigation_evidence_score(
+                    element.content
+                )
+
+            for sequence, element
+            in content_members
+        }
+
+        # ======================================================
+        # GROUP DENSITY
+        #
+        # Used only as supporting evidence.
+        #
+        # It never means:
+        #
+        #   exclude every child.
+        # ======================================================
+
+        medium_count = sum(
+            1
+
+            for score
+            in scores.values()
+
+            if score >= 0.60
+        )
+
+        strong_count = sum(
+            1
+
+            for score
+            in scores.values()
+
+            if score >= 0.85
+        )
+
+        content_count = len(
+            content_members
+        )
+
+        medium_density = (
+            medium_count
+            /
+            content_count
+        )
+
+        # ======================================================
+        # CLASSIFY CHILDREN INDIVIDUALLY
+        # ======================================================
+
+        for sequence, element in (
+            content_members
+        ):
+
+            score = scores[
+                sequence
+            ]
+
+            text = (
+                element.content
+            )
+
+            # --------------------------------------------------
+            # CASE 1:
+            #
+            # Extremely strong navigation evidence.
+            #
+            # Example:
+            #
+            # Encryption ........ 7
+            # --------------------------------------------------
+
+            if score >= 0.90:
+
+                exclusions[
+                    sequence
+                ] = (
+                    "strong_navigation_pattern"
+                )
+
                 continue
 
-            exclusions[
-                sequence
-            ] = reason
+            # --------------------------------------------------
+            # CASE 2:
+            #
+            # Numbered / figure / table reference.
+            #
+            # Example:
+            #
+            # 2.1 Encryption 7
+            #
+            # The score is high enough that it can stand alone.
+            # --------------------------------------------------
+
+            if score >= 0.85:
+
+                exclusions[
+                    sequence
+                ] = (
+                    "navigation_reference"
+                )
+
+                continue
+
+            # --------------------------------------------------
+            # CASE 3:
+            #
+            # Weak navigation-looking element, but the parent
+            # heading is explicitly navigation.
+            #
+            # Example:
+            #
+            # Table of Contents
+            #
+            #   Security Architecture 8
+            #
+            # --------------------------------------------------
+
+            if (
+                strong_navigation_context
+                and
+                score >= 0.60
+            ):
+
+                exclusions[
+                    sequence
+                ] = (
+                    "navigation_heading_and_pattern"
+                )
+
+                continue
+
+            # --------------------------------------------------
+            # CASE 4:
+            #
+            # Unknown heading but navigation-dense siblings.
+            #
+            # Example:
+            #
+            # Overview
+            #
+            #   Security 5
+            #   Privacy 9
+            #   Compliance 12
+            #
+            # if most entries resemble page references.
+            # --------------------------------------------------
+
+            if (
+                content_count >= 3
+                and
+                medium_density >= 0.70
+                and
+                score >= 0.60
+            ):
+
+                exclusions[
+                    sequence
+                ] = (
+                    "navigation_pattern_density"
+                )
+
+                continue
+
+            # --------------------------------------------------
+            # CASE 5:
+            #
+            # One large PDF block may contain many TOC entries.
+            #
+            # Example:
+            #
+            # Security ........ 5
+            # Privacy ......... 8
+            # Compliance ..... 11
+            #
+            # --------------------------------------------------
+
+            if (
+                _count_navigation_references(
+                    text
+                )
+                >= 3
+
+                and
+                score >= 0.85
+            ):
+
+                exclusions[
+                    sequence
+                ] = (
+                    "navigation_reference_block"
+                )
+
+                continue
+
+            # Otherwise preserve it.
 
     return exclusions
 
 
 # ==============================================================
-# NAVIGATION CONTEXT KEY
+# STRONG NAVIGATION CONTEXT
+# ==============================================================
+
+
+def _group_has_strong_navigation_title(
+    members: list[
+        tuple[
+            int,
+            ParsedElement,
+        ]
+    ],
+) -> bool:
+
+    for _, element in members:
+
+        for heading in (
+            element.heading_path
+        ):
+
+            if (
+                _is_strong_navigation_title(
+                    heading
+                )
+            ):
+                return True
+
+        if (
+            element.section_title
+            and
+            _is_strong_navigation_title(
+                element.section_title
+            )
+        ):
+
+            return True
+
+    return False
+
+
+# ==============================================================
+# NAVIGATION GROUPING KEY
 # ==============================================================
 
 
 def _navigation_context_key(
     element: ParsedElement,
 ) -> tuple[str, ...]:
-    """
-    Create a grouping key.
-
-    Best case:
-        heading hierarchy.
-
-    Fallback:
-        section title.
-
-    If there is no structural information, use page scope so
-    that one navigation-heavy page does not cause unrelated
-    unheaded pages to be excluded.
-    """
 
     if element.heading_path:
 
@@ -832,258 +986,9 @@ def _navigation_context_key(
             ),
         )
 
-    # TXT and other documents may have neither page nor
-    # structural hierarchy.
     return (
         "unscoped",
     )
-
-
-# ==============================================================
-# CLASSIFY ONE STRUCTURAL GROUP
-# ==============================================================
-
-
-def _classify_navigation_group(
-    *,
-    context_key: tuple[str, ...],
-    members: list[
-        tuple[
-            int,
-            ParsedElement,
-        ]
-    ],
-) -> str | None:
-
-    # ==========================================================
-    # SIGNAL 1:
-    # Strong structural heading
-    # ==========================================================
-
-    structural_titles: list[
-        str
-    ] = []
-
-    for (
-        _,
-        element,
-    ) in members:
-
-        for heading in (
-            element.heading_path
-        ):
-
-            normalized = (
-                _normalize_section_title(
-                    heading
-                )
-            )
-
-            if normalized:
-
-                structural_titles.append(
-                    normalized
-                )
-
-        if element.section_title:
-
-            normalized = (
-                _normalize_section_title(
-                    element.section_title
-                )
-            )
-
-            if normalized:
-
-                structural_titles.append(
-                    normalized
-                )
-
-    if any(
-        _is_strong_navigation_title(
-            title
-        )
-
-        for title
-        in structural_titles
-    ):
-
-        return (
-            "strong_navigation_heading"
-        )
-
-    # ==========================================================
-    # SIGNAL 2:
-    # Content-pattern density
-    # ==========================================================
-
-    content_members: list[
-        ParsedElement
-    ] = [
-        element
-
-        for (
-            _,
-            element,
-        ) in members
-
-        if (
-            element.element_type
-            != "heading"
-
-            and
-            element.content.strip()
-        )
-    ]
-
-    if not content_members:
-        return None
-
-    evidence_scores = [
-        _navigation_evidence_score(
-            element.content
-        )
-
-        for element
-        in content_members
-    ]
-
-    strong_evidence_count = sum(
-        1
-
-        for score
-        in evidence_scores
-
-        if score >= 0.85
-    )
-
-    medium_evidence_count = sum(
-        1
-
-        for score
-        in evidence_scores
-
-        if score >= 0.60
-    )
-
-    average_score = (
-        sum(
-            evidence_scores
-        )
-        /
-        len(
-            evidence_scores
-        )
-    )
-
-    # ==========================================================
-    # CASE A:
-    #
-    # One PDF block may contain an entire TOC.
-    #
-    # Example:
-    #
-    # Security ............ 4
-    # Compliance .......... 8
-    # Appendix ............ 13
-    #
-    # PyMuPDF may expose that as one element.
-    # ==========================================================
-
-    if (
-        len(
-            content_members
-        )
-        == 1
-    ):
-
-        only_text = (
-            content_members[
-                0
-            ]
-            .content
-        )
-
-        repeated_references = (
-            _count_navigation_references(
-                only_text
-            )
-        )
-
-        if (
-            evidence_scores[
-                0
-            ]
-            >= 0.90
-
-            and
-            repeated_references
-            >= 3
-        ):
-
-            return (
-                "navigation_reference_block"
-            )
-
-        return None
-
-    # ==========================================================
-    # CASE B:
-    #
-    # Multiple strongly navigation-looking elements.
-    #
-    # Require density rather than one accidental match.
-    # ==========================================================
-
-    if (
-        len(
-            content_members
-        )
-        >= 3
-
-        and
-        strong_evidence_count
-        >= 2
-
-        and
-        average_score
-        >= 0.55
-    ):
-
-        return (
-            "navigation_pattern_density"
-        )
-
-    # ==========================================================
-    # CASE C:
-    #
-    # Larger groups can contain a few odd elements.
-    #
-    # If 70% or more look navigation-like, classify the group.
-    # ==========================================================
-
-    if (
-        len(
-            content_members
-        )
-        >= 5
-    ):
-
-        density = (
-            medium_evidence_count
-            /
-            len(
-                content_members
-            )
-        )
-
-        if density >= 0.70:
-
-            return (
-                "navigation_pattern_density"
-            )
-
-    return None
 
 
 # ==============================================================
@@ -1095,53 +1000,42 @@ def _is_strong_navigation_title(
     title: str,
 ) -> bool:
 
-    title = (
+    normalized = (
         _normalize_section_title(
             title
         )
     )
 
     if (
-        title
-        in
-        STRONG_NAVIGATION_TITLES
+        normalized
+        in STRONG_NAVIGATION_TITLES
     ):
-
         return True
 
-    # ----------------------------------------------------------
-    # Also support:
+    # Support:
     #
-    # "Contents — Security Manual"
-    # "Table of Contents - Policy"
+    # Table of Contents - Security Policy
+    # Contents: Vendor Handbook
     #
-    # without treating something such as:
-    #
-    # "Contents of Encryption Keys"
-    #
-    # as navigation.
-    # ----------------------------------------------------------
-
+    # without broadly matching arbitrary prose.
     for navigation_title in (
         STRONG_NAVIGATION_TITLES
     ):
 
         if (
-            title.startswith(
+            normalized.startswith(
                 navigation_title
                 + " - "
             )
 
             or
-
-            title.startswith(
+            normalized.startswith(
                 navigation_title
                 + " — "
             )
 
             or
-
-            title.startswith(
+            normalized.startswith(
                 navigation_title
                 + ": "
             )
@@ -1160,21 +1054,6 @@ def _is_strong_navigation_title(
 def _navigation_evidence_score(
     text: str,
 ) -> float:
-    """
-    Return a score from 0.0 to 1.0.
-
-    1.0:
-        very strong navigation evidence.
-
-    0.0:
-        no navigation evidence.
-
-    This function intentionally favors false negatives over
-    false positives.
-
-    It is better to embed one unnecessary TOC line than to
-    remove important security evidence.
-    """
 
     normalized = (
         _normalize_content_text(
@@ -1186,10 +1065,10 @@ def _navigation_evidence_score(
         return 0.0
 
     # ==========================================================
-    # DOT-LEADER REFERENCES
+    # DOT LEADERS
     #
-    # Very strong evidence.
-    # ==========================================================
+    # Very strong signal.
+    # ======================================================
 
     dot_reference_count = len(
         DOT_LEADER_PAGE_REFERENCE_PATTERN
@@ -1198,23 +1077,15 @@ def _navigation_evidence_score(
         )
     )
 
-    if (
-        dot_reference_count
-        >= 2
-    ):
-
+    if dot_reference_count >= 2:
         return 1.0
 
-    if (
-        dot_reference_count
-        == 1
-    ):
-
+    if dot_reference_count == 1:
         return 0.95
 
     # ==========================================================
-    # FIGURE/TABLE INDEX ENTRY
-    # ==========================================================
+    # FIGURE / TABLE INDEX ENTRY
+    # ======================================================
 
     if (
         FIGURE_TABLE_PAGE_REFERENCE_PATTERN
@@ -1227,17 +1098,10 @@ def _navigation_evidence_score(
 
     # ==========================================================
     # NUMBERED TOC ENTRY
-    #
-    # Example:
-    #
-    # 2.1 Security Controls 8
-    # ==========================================================
+    # ======================================================
 
     if (
-        len(
-            normalized
-        )
-        <= 180
+        len(normalized) <= 180
 
         and
         NUMBERED_PAGE_REFERENCE_PATTERN
@@ -1249,27 +1113,18 @@ def _navigation_evidence_score(
         return 0.85
 
     # ==========================================================
-    # GENERIC SHORT TITLE + PAGE NUMBER
-    #
-    # Weak evidence.
-    #
-    # This will only trigger navigation classification when many
-    # sibling elements look similar.
-    # ==========================================================
+    # WEAK SHORT TITLE + PAGE NUMBER
+    # ======================================================
 
     word_count = len(
         normalized.split()
     )
 
     if (
-        len(
-            normalized
-        )
-        <= 120
+        len(normalized) <= 120
 
         and
-        word_count
-        <= 14
+        word_count <= 14
 
         and
         SHORT_TITLE_PAGE_REFERENCE_PATTERN
@@ -1294,43 +1149,27 @@ def _navigation_evidence_score(
 
 
 # ==============================================================
-# COUNT NAVIGATION REFERENCES
+# COUNT NAVIGATION REFERENCES IN ONE BLOCK
 # ==============================================================
 
 
 def _count_navigation_references(
     text: str,
 ) -> int:
-    """
-    Count strong page-reference patterns inside a block.
 
-    Useful when an entire TOC has been extracted as one PDF
-    element.
-    """
+    if not text.strip():
+        return 0
 
-    normalized = (
-        _normalize_content_text(
+    # Dot leaders may exist several times inside one PDF block.
+    dot_count = len(
+        DOT_LEADER_PAGE_REFERENCE_PATTERN
+        .findall(
             text
         )
     )
 
-    if not normalized:
-        return 0
-
-    dot_references = len(
-        DOT_LEADER_PAGE_REFERENCE_PATTERN
-        .findall(
-            normalized
-        )
-    )
-
-    if dot_references:
-        return dot_references
-
-    # ----------------------------------------------------------
-    # If line structure survived parsing, evaluate individual
-    # lines too.
-    # ----------------------------------------------------------
+    if dot_count:
+        return dot_count
 
     lines = [
         line.strip()
@@ -1358,7 +1197,6 @@ def _count_navigation_references(
             )
 
             or
-
             FIGURE_TABLE_PAGE_REFERENCE_PATTERN
             .fullmatch(
                 normalized_line
@@ -1371,7 +1209,7 @@ def _count_navigation_references(
 
 
 # ==============================================================
-# SECTION TITLE NORMALIZATION
+# STRUCTURAL TITLE NORMALIZATION
 # ==============================================================
 
 
@@ -1433,7 +1271,7 @@ def _normalize_content_text(
 
 
 # ==============================================================
-# SPLIT ONE OVERSIZED TEXT ELEMENT
+# SPLIT ONE OVERSIZED SOURCE ELEMENT
 # ==============================================================
 
 
@@ -1443,22 +1281,6 @@ def _split_long_text(
     max_chars: int,
     overlap_chars: int,
 ) -> list[str]:
-    """
-    Split one oversized source element while attempting to
-    preserve natural boundaries.
-
-    Preferred boundaries:
-
-        paragraph
-        newline
-        sentence
-        semicolon
-        comma
-        whitespace
-        hard character boundary
-
-    Adjacent pieces preserve a small character overlap.
-    """
 
     text = (
         text.strip()
@@ -1481,20 +1303,13 @@ def _split_long_text(
         ),
     )
 
-    if (
-        len(
-            text
-        )
-        <= max_chars
-    ):
+    if len(text) <= max_chars:
 
         return [
             text
         ]
 
-    pieces: list[
-        str
-    ] = []
+    pieces: list[str] = []
 
     start = 0
 
@@ -1506,36 +1321,16 @@ def _split_long_text(
         ),
     )
 
-    while (
-        start
-        < len(
-            text
-        )
-    ):
+    while start < len(text):
 
         hard_end = min(
-            start
-            + max_chars,
-
-            len(
-                text
-            ),
+            start + max_chars,
+            len(text),
         )
 
-        # ------------------------------------------------------
-        # LAST PIECE
-        # ------------------------------------------------------
+        if hard_end >= len(text):
 
-        if (
-            hard_end
-            >= len(
-                text
-            )
-        ):
-
-            end = len(
-                text
-            )
+            end = len(text)
 
         else:
 
@@ -1549,10 +1344,6 @@ def _split_long_text(
             break_positions: list[
                 int
             ] = []
-
-            # --------------------------------------------------
-            # Search for natural boundaries.
-            # --------------------------------------------------
 
             for separator in (
                 "\n\n",
@@ -1573,10 +1364,7 @@ def _split_long_text(
                     )
                 )
 
-                if (
-                    position
-                    != -1
-                ):
+                if position != -1:
 
                     break_positions.append(
                         position
@@ -1604,13 +1392,7 @@ def _split_long_text(
 
         if piece:
 
-            # Defensive guarantee.
-            if (
-                len(
-                    piece
-                )
-                <= max_chars
-            ):
+            if len(piece) <= max_chars:
 
                 pieces.append(
                     piece
@@ -1625,13 +1407,7 @@ def _split_long_text(
                     .strip()
                 )
 
-        if (
-            end
-            >= len(
-                text
-            )
-        ):
-
+        if end >= len(text):
             break
 
         # ======================================================
@@ -1640,15 +1416,12 @@ def _split_long_text(
 
         next_start = max(
             start + 1,
-
-            end
-            - overlap_chars,
+            end - overlap_chars,
         )
 
         # Avoid beginning in the middle of a word.
         while (
-            next_start
-            < end
+            next_start < end
 
             and
             not text[
@@ -1658,12 +1431,8 @@ def _split_long_text(
 
             next_start += 1
 
-        # Remove whitespace at the start of the next chunk.
         while (
-            next_start
-            < len(
-                text
-            )
+            next_start < len(text)
 
             and
             text[
@@ -1673,18 +1442,10 @@ def _split_long_text(
 
             next_start += 1
 
-        # Infinite-loop protection.
-        if (
-            next_start
-            <= start
-        ):
+        if next_start <= start:
 
-            next_start = (
-                end
-            )
+            next_start = end
 
-        start = (
-            next_start
-        )
+        start = next_start
 
     return pieces
