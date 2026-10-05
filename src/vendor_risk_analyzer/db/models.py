@@ -24,6 +24,8 @@ from vendor_risk_analyzer.db.base import (
     UUIDPrimaryKeyMixin,
 )
 
+from pgvector.sqlalchemy import Vector
+
 
 class Vendor(
     UUIDPrimaryKeyMixin,
@@ -280,7 +282,7 @@ class DocumentChunk(
     )
 
     embedding: Mapped[list[float] | None] = mapped_column(
-        Vector(),
+        Vector(768),
         nullable=True,
     )
 
