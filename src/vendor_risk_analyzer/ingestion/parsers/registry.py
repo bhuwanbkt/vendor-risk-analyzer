@@ -7,11 +7,15 @@ from vendor_risk_analyzer.ingestion.parsers.markdown import (
 from vendor_risk_analyzer.ingestion.parsers.text import (
     TextParser,
 )
+from vendor_risk_analyzer.ingestion.parsers.pdf import (
+    PDFParser,
+)
 
 
 PARSERS: list[BaseParser] = [
     TextParser(),
     MarkdownParser(),
+    PDFParser(),
 ]
 
 
