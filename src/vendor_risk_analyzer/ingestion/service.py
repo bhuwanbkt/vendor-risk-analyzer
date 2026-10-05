@@ -89,7 +89,9 @@ async def ingest_document(
                 heading_path=(
                     element.heading_path
                 ),
-                bounding_box=None,
+                bounding_box=element.metadata.get(
+                    "bbox"
+                ),
                 extra_data=(
                     element.metadata
                 ),
@@ -148,7 +150,9 @@ async def ingest_document(
 
         document.status = "parsed"
 
-        document.parser_version = "1.3"
+        document.parser_version = (
+            parser.parser_version
+        )
 
         document.extra_data = {
             **document.extra_data,

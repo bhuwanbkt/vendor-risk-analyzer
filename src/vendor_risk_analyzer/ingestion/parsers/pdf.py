@@ -1,4 +1,7 @@
+import math
 import re
+import unicodedata
+from collections import defaultdict
 from statistics import median
 
 import pymupdf
@@ -14,62 +17,140 @@ PAGE_NUMBER_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+TABLE_CAPTION_PATTERN = re.compile(
+    r"^table\s+[A-Za-z]?\d+(?:[.\-:])?\b",
+    re.IGNORECASE,
+)
+
+FIGURE_CAPTION_PATTERN = re.compile(
+    r"^(?:fig(?:ure)?\.?)\s+[A-Za-z]?\d+(?:[.\-:])?\b",
+    re.IGNORECASE,
+)
+
+# Examples:
+#
+# ID.AM-01:
+# GV.OC-01:
+# o ID.AM-01:
+#
+# These are control/subcategory items, not section headings.
+CONTROL_ITEM_PATTERN = re.compile(
+    r"^(?:[oO]\s+)?"
+    r"[A-Z]{2,6}\.[A-Z]{2,6}-\d{2}\s*:"
+)
+
+BULLET_PATTERN = re.compile(
+    r"^[•●▪◦‣]\s*"
+)
+
 
 class PDFParser(BaseParser):
     supported_extensions = {"pdf"}
+
+    parser_version = "1.5"
 
     def parse(
         self,
         content: bytes,
     ) -> list[ParsedElement]:
+
         document = pymupdf.open(
             stream=content,
             filetype="pdf",
         )
 
         try:
+            # ==================================================
+            # PDF BOOKMARK / OUTLINE INFORMATION
+            #
+            # If the PDF contains a real outline, it is stronger
+            # heading evidence than font-size guessing.
+            # ==================================================
+
+            toc_levels = (
+                self._build_toc_level_map(
+                    document
+                )
+            )
+
             raw_blocks: list[dict] = []
 
             # ==================================================
             # PASS 1
-            # Extract text blocks and tables from every page
+            #
+            # Extract:
+            #
+            # - normal text
+            # - font information
+            # - bounding boxes
+            # - tables
+            # - page numbers
             # ==================================================
 
-            for page_index, page in enumerate(document):
-                page_number = page_index + 1
-                page_height = float(page.rect.height)
+            for page_index, page in enumerate(
+                document
+            ):
+                page_number = (
+                    page_index + 1
+                )
 
-                page_blocks: list[dict] = []
+                page_height = float(
+                    page.rect.height
+                )
 
-                # ----------------------------------------------
-                # Find tables first.
-                #
-                # We do this before regular text extraction so
-                # text inside a detected table is not stored
-                # again as normal paragraph text.
-                # ----------------------------------------------
-
-                table_bboxes: list[
-                    tuple[float, float, float, float]
+                page_blocks: list[
+                    dict
                 ] = []
 
+                table_bboxes: list[
+                    tuple[
+                        float,
+                        float,
+                        float,
+                        float,
+                    ]
+                ] = []
+
+                # ==============================================
+                # TABLE DETECTION
+                # ==============================================
+
                 try:
-                    table_finder = page.find_tables()
-                    tables = table_finder.tables
-
-                except Exception:
-                    # A PDF may have no detectable tables or
-                    # table detection may fail on unusual layouts.
-                    # Regular text extraction should still work.
-                    tables = []
-
-                for table_index, table in enumerate(tables):
-                    bbox = tuple(
-                        float(value)
-                        for value in table.bbox
+                    table_finder = (
+                        page.find_tables()
                     )
 
-                    rows = table.extract()
+                    tables = (
+                        table_finder.tables
+                    )
+
+                except Exception:
+                    # Text parsing must still work even if one
+                    # page has malformed table geometry.
+                    tables = []
+
+                for (
+                    table_index,
+                    table,
+                ) in enumerate(
+                    tables
+                ):
+                    try:
+                        bbox = tuple(
+                            float(value)
+                            for value
+                            in table.bbox
+                        )
+
+                        rows = (
+                            table.extract()
+                        )
+
+                    except Exception:
+                        # Some malformed PDF tables can expose
+                        # invalid/empty geometry. Skip the table,
+                        # not the whole document.
+                        continue
 
                     if not rows:
                         continue
@@ -89,12 +170,11 @@ class PDFParser(BaseParser):
 
                     column_count = max(
                         len(row)
-                        for row in normalized_rows
+                        for row
+                        in normalized_rows
                     )
 
-                    # Something with fewer than 2 rows or
-                    # fewer than 2 meaningful columns is
-                    # probably not useful as a table.
+                    # Avoid false-positive one-cell layouts.
                     if (
                         row_count < 2
                         or column_count < 2
@@ -116,39 +196,65 @@ class PDFParser(BaseParser):
 
                     page_blocks.append(
                         {
-                            "kind": "table",
-                            "text": markdown,
-                            "page_number": page_number,
-                            "page_height": page_height,
-                            "bbox": bbox,
-                            "table_index": table_index,
-                            "row_count": row_count,
-                            "column_count": column_count,
-                            "font_sizes": [],
-                            "bold": False,
+                            "kind":
+                                "table",
+
+                            "text":
+                                markdown,
+
+                            "page_number":
+                                page_number,
+
+                            "page_height":
+                                page_height,
+
+                            "bbox":
+                                bbox,
+
+                            "table_index":
+                                table_index,
+
+                            "row_count":
+                                row_count,
+
+                            "column_count":
+                                column_count,
+
+                            "font_sizes":
+                                [],
+
+                            "bold":
+                                False,
                         }
                     )
 
-                # ----------------------------------------------
-                # Extract normal text blocks
-                # ----------------------------------------------
+                # ==============================================
+                # REGULAR TEXT EXTRACTION
+                # ==============================================
 
-                page_dict = page.get_text(
-                    "dict"
+                page_dict = (
+                    page.get_text(
+                        "dict"
+                    )
                 )
 
                 for block in page_dict.get(
                     "blocks",
                     [],
                 ):
+
                     # PyMuPDF:
+                    #
                     # 0 = text
                     # 1 = image
+                    #
                     if block.get("type") != 0:
                         continue
 
-                    block_bbox = block.get(
-                        "bbox"
+                    block_bbox = (
+                        block.get(
+                            "bbox"
+                        )
                     )
 
                     if not block_bbox:
@@ -156,16 +262,15 @@ class PDFParser(BaseParser):
 
                     block_bbox = tuple(
                         float(value)
-                        for value in block_bbox
+                        for value
+                        in block_bbox
                     )
 
                     # ------------------------------------------
-                    # Prevent table content from also becoming
-                    # normal paragraph content.
+                    # TABLE TEXT DEDUPLICATION
                     #
-                    # If at least 50% of the text block lies
-                    # inside a detected table, the table element
-                    # owns that content.
+                    # Text inside a detected table should not
+                    # also become ordinary paragraph content.
                     # ------------------------------------------
 
                     inside_table = any(
@@ -174,6 +279,7 @@ class PDFParser(BaseParser):
                             table_bbox,
                         )
                         >= 0.50
+
                         for table_bbox
                         in table_bboxes
                     )
@@ -181,8 +287,13 @@ class PDFParser(BaseParser):
                     if inside_table:
                         continue
 
-                    lines: list[str] = []
-                    font_sizes: list[float] = []
+                    lines: list[
+                        str
+                    ] = []
+
+                    font_sizes: list[
+                        float
+                    ] = []
 
                     bold_detected = False
 
@@ -190,19 +301,24 @@ class PDFParser(BaseParser):
                         "lines",
                         [],
                     ):
-                        line_parts: list[str] = []
+
+                        line_parts: list[
+                            str
+                        ] = []
 
                         for span in line.get(
                             "spans",
                             [],
                         ):
+
                             span_text = (
-                                span
-                                .get(
-                                    "text",
-                                    "",
+                                self
+                                ._normalize_inline_text(
+                                    span.get(
+                                        "text",
+                                        "",
+                                    )
                                 )
-                                .strip()
                             )
 
                             if not span_text:
@@ -216,9 +332,14 @@ class PDFParser(BaseParser):
                                 "size"
                             )
 
-                            if size is not None:
+                            if (
+                                size
+                                is not None
+                            ):
                                 font_sizes.append(
-                                    float(size)
+                                    float(
+                                        size
+                                    )
                                 )
 
                             font_name = (
@@ -230,57 +351,92 @@ class PDFParser(BaseParser):
                                 .lower()
                             )
 
-                            if (
-                                "bold" in font_name
-                                or "black" in font_name
-                                or "semibold" in font_name
-                            ):
-                                bold_detected = True
+                            if any(
+                                weight
+                                in font_name
 
-                        line_text = " ".join(
-                            line_parts
-                        ).strip()
+                                for weight in (
+                                    "bold",
+                                    "black",
+                                    "semibold",
+                                    "demi",
+                                )
+                            ):
+                                bold_detected = (
+                                    True
+                                )
+
+                        line_text = (
+                            " ".join(
+                                line_parts
+                            )
+                            .strip()
+                        )
 
                         if line_text:
                             lines.append(
                                 line_text
                             )
 
-                    text = " ".join(
-                        lines
-                    ).strip()
+                    text = (
+                        " ".join(
+                            lines
+                        )
+                        .strip()
+                    )
 
                     if not text:
                         continue
 
                     page_blocks.append(
                         {
-                            "kind": "text",
-                            "text": text,
-                            "page_number": page_number,
-                            "page_height": page_height,
-                            "font_sizes": font_sizes,
-                            "bold": bold_detected,
-                            "bbox": block_bbox,
+                            "kind":
+                                "text",
+
+                            "text":
+                                text,
+
+                            "page_number":
+                                page_number,
+
+                            "page_height":
+                                page_height,
+
+                            "font_sizes":
+                                font_sizes,
+
+                            "bold":
+                                bold_detected,
+
+                            "bbox":
+                                block_bbox,
                         }
                     )
 
-                # ----------------------------------------------
-                # Restore approximate PDF reading order.
+                # ==============================================
+                # APPROXIMATE READING ORDER
                 #
-                # Vertical position first, then horizontal.
-                # ----------------------------------------------
+                # Top-to-bottom, then left-to-right.
+                # ==============================================
 
                 page_blocks.sort(
                     key=lambda item: (
                         (
-                            item["bbox"][1]
-                            if item.get("bbox")
+                            item[
+                                "bbox"
+                            ][1]
+                            if item.get(
+                                "bbox"
+                            )
                             else 0
                         ),
                         (
-                            item["bbox"][0]
-                            if item.get("bbox")
+                            item[
+                                "bbox"
+                            ][0]
+                            if item.get(
+                                "bbox"
+                            )
                             else 0
                         ),
                     )
@@ -292,66 +448,93 @@ class PDFParser(BaseParser):
 
             # ==================================================
             # PASS 2
-            # Remove obvious headers, footers and page numbers
+            #
+            # Estimate normal body font.
             # ==================================================
 
-            cleaned_blocks = [
-                block
-                for block in raw_blocks
-                if not self._is_noise(
-                    block
+            body_font_size = (
+                self._estimate_body_font_size(
+                    raw_blocks
                 )
-            ]
+            )
 
             # ==================================================
             # PASS 3
-            # Estimate normal document body font size.
             #
-            # Tables are excluded because they do not carry
-            # font-size information in our normalized structure.
+            # Learn repeated headers / footers from the document.
+            #
+            # This fixes PDFs such as the NIST document where
+            # the running header sits slightly below our older
+            # fixed 7% cutoff.
             # ==================================================
 
-            all_font_sizes: list[float] = []
-
-            for block in cleaned_blocks:
-                if (
-                    block.get("kind")
-                    != "text"
-                ):
-                    continue
-
-                all_font_sizes.extend(
-                    block["font_sizes"]
+            repeated_margin_signatures = (
+                self
+                ._find_repeated_margin_signatures(
+                    raw_blocks,
+                    page_count=len(
+                        document
+                    ),
                 )
-
-            body_font_size = (
-                median(
-                    all_font_sizes
-                )
-                if all_font_sizes
-                else 11.0
             )
 
             # ==================================================
             # PASS 4
-            # Convert normalized PDF blocks into ParsedElements
+            #
+            # Remove:
+            #
+            # - repeated headers
+            # - repeated footers
+            # - standalone page numbers
+            # - conservative small-margin noise
+            # ==================================================
+
+            cleaned_blocks = [
+                block
+                for block
+                in raw_blocks
+
+                if not self._is_noise(
+                    block,
+                    repeated_margin_signatures=(
+                        repeated_margin_signatures
+                    ),
+                )
+            ]
+
+            # ==================================================
+            # PASS 5
+            #
+            # Convert to ParsedElements.
             # ==================================================
 
             elements: list[
                 ParsedElement
             ] = []
 
-            # Example:
-            #
-            # {
-            #     1: "Security Products and Features",
-            #     2: "Data Encryption"
-            # }
-            #
             heading_stack: dict[
                 int,
                 str,
             ] = {}
+
+            # A table caption usually appears immediately before
+            # a table.
+            pending_table_caption: (
+                str | None
+            ) = None
+
+            pending_table_caption_page: (
+                int | None
+            ) = None
+
+            # Used for multi-page table continuation.
+            last_table_caption: (
+                str | None
+            ) = None
+
+            last_table_page: (
+                int | None
+            ) = None
 
             for block in cleaned_blocks:
 
@@ -360,12 +543,220 @@ class PDFParser(BaseParser):
                 # ==============================================
 
                 if (
-                    block.get("kind")
+                    block.get(
+                        "kind"
+                    )
                     == "table"
                 ):
+
                     heading_path = [
-                        heading_stack[level]
-                        for level in sorted(
+                        heading_stack[
+                            level
+                        ]
+
+                        for level
+                        in sorted(
+                            heading_stack
+                        )
+                    ]
+
+                    section_title = (
+                        heading_path[-1]
+                        if heading_path
+                        else None
+                    )
+
+                    caption: (
+                        str | None
+                    ) = None
+
+                    is_continuation = (
+                        False
+                    )
+
+                    # ------------------------------------------
+                    # Same-page caption:
+                    #
+                    # Table 1. ...
+                    # [actual table]
+                    # ------------------------------------------
+
+                    if (
+                        pending_table_caption
+                        and
+                        pending_table_caption_page
+                        ==
+                        block[
+                            "page_number"
+                        ]
+                    ):
+
+                        caption = (
+                            pending_table_caption
+                        )
+
+                    # ------------------------------------------
+                    # Multi-page continuation:
+                    #
+                    # Page 29 = Table 2 begins
+                    # Page 30 = table continues near page top
+                    # ------------------------------------------
+
+                    elif (
+                        last_table_caption
+                        and
+                        last_table_page
+                        is not None
+
+                        and
+                        block[
+                            "page_number"
+                        ]
+                        ==
+                        last_table_page
+                        + 1
+
+                        and
+                        block[
+                            "bbox"
+                        ][1]
+                        <
+                        block[
+                            "page_height"
+                        ]
+                        * 0.20
+                    ):
+
+                        caption = (
+                            last_table_caption
+                        )
+
+                        is_continuation = (
+                            True
+                        )
+
+                    metadata = {
+                        "bbox":
+                            block[
+                                "bbox"
+                            ],
+
+                        "table_index":
+                            block[
+                                "table_index"
+                            ],
+
+                        "row_count":
+                            block[
+                                "row_count"
+                            ],
+
+                        "column_count":
+                            block[
+                                "column_count"
+                            ],
+
+                        "is_continuation":
+                            is_continuation,
+                    }
+
+                    if caption:
+                        metadata[
+                            "caption"
+                        ] = caption
+
+                    elements.append(
+                        ParsedElement(
+                            element_type=
+                                "table",
+
+                            content=
+                                block[
+                                    "text"
+                                ],
+
+                            page_number=
+                                block[
+                                    "page_number"
+                                ],
+
+                            section_title=
+                                section_title,
+
+                            heading_path=
+                                heading_path,
+
+                            metadata=
+                                metadata,
+                        )
+                    )
+
+                    last_table_caption = (
+                        caption
+                    )
+
+                    last_table_page = (
+                        block[
+                            "page_number"
+                        ]
+                    )
+
+                    pending_table_caption = (
+                        None
+                    )
+
+                    pending_table_caption_page = (
+                        None
+                    )
+
+                    continue
+
+                # ==============================================
+                # NORMAL TEXT BLOCK
+                # ==============================================
+
+                text = block[
+                    "text"
+                ]
+
+                block_font_size = (
+                    max(
+                        block[
+                            "font_sizes"
+                        ]
+                    )
+
+                    if block[
+                        "font_sizes"
+                    ]
+
+                    else body_font_size
+                )
+
+                # ==============================================
+                # FIGURE / TABLE CAPTION
+                #
+                # Captions are NOT headings.
+                # ==============================================
+
+                caption_type = (
+                    self._get_caption_type(
+                        text
+                    )
+                )
+
+                if (
+                    caption_type
+                    is not None
+                ):
+
+                    heading_path = [
+                        heading_stack[
+                            level
+                        ]
+
+                        for level
+                        in sorted(
                             heading_stack
                         )
                     ]
@@ -378,105 +769,138 @@ class PDFParser(BaseParser):
 
                     elements.append(
                         ParsedElement(
-                            element_type="table",
-                            content=block["text"],
-                            page_number=block[
-                                "page_number"
-                            ],
-                            section_title=(
-                                section_title
-                            ),
-                            heading_path=(
-                                heading_path
-                            ),
+                            element_type=
+                                "caption",
+
+                            content=
+                                text,
+
+                            page_number=
+                                block[
+                                    "page_number"
+                                ],
+
+                            section_title=
+                                section_title,
+
+                            heading_path=
+                                heading_path,
+
                             metadata={
+                                "caption_type":
+                                    caption_type,
+
+                                "font_size":
+                                    block_font_size,
+
+                                "bold":
+                                    block[
+                                        "bold"
+                                    ],
+
                                 "bbox":
                                     block[
                                         "bbox"
-                                    ],
-                                "table_index":
-                                    block[
-                                        "table_index"
-                                    ],
-                                "row_count":
-                                    block[
-                                        "row_count"
-                                    ],
-                                "column_count":
-                                    block[
-                                        "column_count"
                                     ],
                             },
                         )
                     )
 
+                    if (
+                        caption_type
+                        == "table"
+                    ):
+
+                        pending_table_caption = (
+                            text
+                        )
+
+                        pending_table_caption_page = (
+                            block[
+                                "page_number"
+                            ]
+                        )
+
+                    else:
+
+                        pending_table_caption = (
+                            None
+                        )
+
+                        pending_table_caption_page = (
+                            None
+                        )
+
                     continue
 
-                # ==============================================
-                # NORMAL TEXT
-                # ==============================================
+                # A table caption should normally be adjacent to
+                # the table. If unrelated text appears first,
+                # stop carrying the pending caption.
+                if (
+                    pending_table_caption
 
-                text = block[
-                    "text"
-                ]
+                    and
+                    pending_table_caption_page
+                    ==
+                    block[
+                        "page_number"
+                    ]
+                ):
 
-                if block["font_sizes"]:
-                    block_font_size = max(
-                        block[
-                            "font_sizes"
-                        ]
+                    pending_table_caption = (
+                        None
                     )
 
-                else:
-                    block_font_size = (
-                        body_font_size
+                    pending_table_caption_page = (
+                        None
                     )
+
+                # ==============================================
+                # HEADING DETECTION
+                # ==============================================
 
                 heading_level = (
                     self._get_heading_level(
                         text=text,
-                        font_size=(
-                            block_font_size
-                        ),
-                        body_font_size=(
-                            body_font_size
-                        ),
-                        bold=block[
-                            "bold"
-                        ],
+
+                        page_number=
+                            block[
+                                "page_number"
+                            ],
+
+                        font_size=
+                            block_font_size,
+
+                        body_font_size=
+                            body_font_size,
+
+                        bold=
+                            block[
+                                "bold"
+                            ],
+
+                        toc_levels=
+                            toc_levels,
                     )
                 )
 
-                # ==============================================
-                # HEADING
-                # ==============================================
+                if (
+                    heading_level
+                    is not None
+                ):
 
-                if heading_level is not None:
-
-                    # When a new heading appears, remove
-                    # headings at the same level or deeper.
-                    #
-                    # Example:
-                    #
-                    # Level 1:
-                    # Security Products and Features
-                    #
-                    # Level 2:
-                    # Data Encryption
-                    #
-                    # New Level 2:
-                    # Identity and Access Control
-                    #
-                    # Data Encryption is replaced.
-                    # ------------------------------------------
-
-                    for existing_level in list(
+                    for (
+                        existing_level
+                    ) in list(
                         heading_stack.keys()
                     ):
+
                         if (
                             existing_level
-                            >= heading_level
+                            >=
+                            heading_level
                         ):
+
                             del heading_stack[
                                 existing_level
                             ]
@@ -486,34 +910,57 @@ class PDFParser(BaseParser):
                     ] = text
 
                     heading_path = [
-                        heading_stack[level]
-                        for level in sorted(
+                        heading_stack[
+                            level
+                        ]
+
+                        for level
+                        in sorted(
                             heading_stack
                         )
                     ]
 
+                    # A real heading ends any previous table
+                    # continuation context.
+                    last_table_caption = (
+                        None
+                    )
+
+                    last_table_page = (
+                        None
+                    )
+
                     elements.append(
                         ParsedElement(
-                            element_type=(
-                                "heading"
-                            ),
-                            content=text,
-                            page_number=block[
-                                "page_number"
-                            ],
-                            section_title=text,
-                            heading_path=(
-                                heading_path
-                            ),
+                            element_type=
+                                "heading",
+
+                            content=
+                                text,
+
+                            page_number=
+                                block[
+                                    "page_number"
+                                ],
+
+                            section_title=
+                                text,
+
+                            heading_path=
+                                heading_path,
+
                             metadata={
                                 "heading_level":
                                     heading_level,
+
                                 "font_size":
                                     block_font_size,
+
                                 "bold":
                                     block[
                                         "bold"
                                     ],
+
                                 "bbox":
                                     block[
                                         "bbox"
@@ -529,8 +976,12 @@ class PDFParser(BaseParser):
                 # ==============================================
 
                 heading_path = [
-                    heading_stack[level]
-                    for level in sorted(
+                    heading_stack[
+                        level
+                    ]
+
+                    for level
+                    in sorted(
                         heading_stack
                     )
                 ]
@@ -543,22 +994,27 @@ class PDFParser(BaseParser):
 
                 elements.append(
                     ParsedElement(
-                        element_type=(
-                            "paragraph"
-                        ),
-                        content=text,
-                        page_number=block[
-                            "page_number"
-                        ],
-                        section_title=(
-                            section_title
-                        ),
-                        heading_path=(
-                            heading_path
-                        ),
+                        element_type=
+                            "paragraph",
+
+                        content=
+                            text,
+
+                        page_number=
+                            block[
+                                "page_number"
+                            ],
+
+                        section_title=
+                            section_title,
+
+                        heading_path=
+                            heading_path,
+
                         metadata={
                             "font_size":
                                 block_font_size,
+
                             "bbox":
                                 block[
                                     "bbox"
@@ -573,409 +1029,392 @@ class PDFParser(BaseParser):
             document.close()
 
     # ==========================================================
-    # TABLE NORMALIZATION
+    # PDF OUTLINE / BOOKMARK HEADINGS
     # ==========================================================
 
-    def _normalize_table_rows(
+    def _build_toc_level_map(
         self,
-        rows: list,
-    ) -> list[list[str]]:
-        normalized: list[
-            list[str]
-        ] = []
+        document: pymupdf.Document,
+    ) -> dict[
+        tuple[int, str],
+        int,
+    ]:
 
-        # ------------------------------------------------------
-        # STEP 1
-        # Normalize every individual table cell.
-        # ------------------------------------------------------
+        result: dict[
+            tuple[int, str],
+            int,
+        ] = {}
 
-        for row in rows:
-            normalized_row: list[
-                str
-            ] = []
+        try:
+            toc = document.get_toc()
 
-            for cell in row:
-                if cell is None:
-                    value = ""
+        except Exception:
+            return result
 
-                else:
-                    value = str(
-                        cell
-                    )
+        for item in toc:
 
-                value = (
-                    value
-                    .replace(
-                        "\n",
-                        " ",
-                    )
-                    .replace(
-                        "\r",
-                        " ",
-                    )
-                    .strip()
+            if len(item) < 3:
+                continue
+
+            level, title, page_number = (
+                item[:3]
+            )
+
+            if (
+                not isinstance(
+                    page_number,
+                    int,
                 )
-
-                # Collapse repeated spaces.
-                #
-                # Example:
-                #
-                # "Risk     Management"
-                #
-                # becomes:
-                #
-                # "Risk Management"
-                # ----------------------------------------------
-
-                value = re.sub(
-                    r"\s+",
-                    " ",
-                    value,
-                )
-
-                # Escape markdown pipe characters appearing
-                # inside actual cell values.
-                value = value.replace(
-                    "|",
-                    "\\|",
-                )
-
-                normalized_row.append(
-                    value
-                )
-
-            # Ignore rows where every cell is empty.
-            if any(
-                cell.strip()
-                for cell in normalized_row
+                or page_number <= 0
             ):
-                normalized.append(
-                    normalized_row
-                )
+                continue
 
-        if not normalized:
-            return []
-
-        # ------------------------------------------------------
-        # STEP 2
-        # Make every row have the same physical width.
-        # ------------------------------------------------------
-
-        max_columns = max(
-            len(row)
-            for row in normalized
-        )
-
-        padded_rows: list[
-            list[str]
-        ] = []
-
-        for row in normalized:
-            padded_row = (
-                row
-                + [""] * (
-                    max_columns
-                    - len(row)
+            title_key = (
+                self._normalize_match_text(
+                    str(title)
                 )
             )
 
-            padded_rows.append(
-                padded_row
+            if not title_key:
+                continue
+
+            level = max(
+                1,
+                min(
+                    int(level),
+                    3,
+                ),
             )
 
-        # ------------------------------------------------------
-        # STEP 3
-        # Detect columns containing meaningful data.
-        #
-        # This fixes PDFs such as NIST CSF where PyMuPDF may
-        # detect spacer columns.
-        #
-        # Example raw table:
-        #
-        # | "" | Function | "" | "" | Category | "" |
-        # | "" | ...      | "" | "" | ...      | "" |
-        #
-        # Desired table:
-        #
-        # | Function | Category | Category Identifier |
-        # ------------------------------------------------------
+            key = (
+                page_number,
+                title_key,
+            )
 
-        columns_to_keep: list[
-            int
+            result[key] = min(
+                result.get(
+                    key,
+                    level,
+                ),
+                level,
+            )
+
+        return result
+
+    # ==========================================================
+    # BODY FONT ESTIMATION
+    # ==========================================================
+
+    def _estimate_body_font_size(
+        self,
+        blocks: list[dict],
+    ) -> float:
+
+        central_sizes: list[
+            float
         ] = []
 
-        for column_index in range(
-            max_columns
-        ):
-            has_content = any(
-                row[
-                    column_index
-                ].strip()
-                for row in padded_rows
-            )
+        fallback_sizes: list[
+            float
+        ] = []
 
-            if has_content:
-                columns_to_keep.append(
-                    column_index
+        for block in blocks:
+
+            if (
+                block.get(
+                    "kind"
+                )
+                != "text"
+            ):
+                continue
+
+            sizes = [
+                float(size)
+
+                for size
+                in block.get(
+                    "font_sizes",
+                    [],
                 )
 
-        if not columns_to_keep:
-            return []
-
-        # ------------------------------------------------------
-        # STEP 4
-        # Remove columns that are empty in every row.
-        # ------------------------------------------------------
-
-        cleaned_rows: list[
-            list[str]
-        ] = []
-
-        for row in padded_rows:
-            cleaned_row = [
-                row[
-                    column_index
-                ]
-                for column_index
-                in columns_to_keep
+                if (
+                    size
+                    and float(
+                        size
+                    ) > 0
+                )
             ]
 
-            cleaned_rows.append(
-                cleaned_row
+            if not sizes:
+                continue
+
+            block_size = float(
+                median(
+                    sizes
+                )
             )
 
-        return cleaned_rows
+            fallback_sizes.append(
+                block_size
+            )
+
+            bbox = block.get(
+                "bbox"
+            )
+
+            page_height = (
+                block.get(
+                    "page_height"
+                )
+            )
+
+            if (
+                not bbox
+                or not page_height
+            ):
+                continue
+
+            _, y0, _, y1 = bbox
+
+            # Prefer central body paragraphs and avoid page
+            # margins/title areas when estimating body font.
+            if (
+                y0
+                >=
+                page_height
+                * 0.12
+
+                and
+                y1
+                <=
+                page_height
+                * 0.88
+
+                and
+                len(
+                    block.get(
+                        "text",
+                        "",
+                    )
+                )
+                >= 20
+            ):
+
+                central_sizes.append(
+                    block_size
+                )
+
+        if central_sizes:
+            return float(
+                median(
+                    central_sizes
+                )
+            )
+
+        if fallback_sizes:
+            return float(
+                median(
+                    fallback_sizes
+                )
+            )
+
+        return 11.0
 
     # ==========================================================
-    # TABLE → MARKDOWN
+    # REPEATED HEADER / FOOTER DETECTION
     # ==========================================================
 
-    def _table_to_markdown(
+    def _find_repeated_margin_signatures(
         self,
-        rows: list[list[str]],
-    ) -> str:
-        if not rows:
-            return ""
-
-        column_count = max(
-            len(row)
-            for row in rows
-        )
-
-        if column_count == 0:
-            return ""
-
-        padded_rows: list[
-            list[str]
-        ] = []
-
-        for row in rows:
-            padded_row = (
-                row
-                + [""] * (
-                    column_count
-                    - len(row)
-                )
-            )
-
-            padded_rows.append(
-                padded_row
-            )
-
-        # First row becomes the Markdown header.
-        header = padded_rows[0]
-
-        lines = [
-            (
-                "| "
-                + " | ".join(
-                    header
-                )
-                + " |"
-            ),
-            (
-                "| "
-                + " | ".join(
-                    ["---"]
-                    * column_count
-                )
-                + " |"
-            ),
-        ]
-
-        for row in padded_rows[
-            1:
-        ]:
-            lines.append(
-                "| "
-                + " | ".join(
-                    row
-                )
-                + " |"
-            )
-
-        return "\n".join(
-            lines
-        )
-
-    # ==========================================================
-    # BOUNDING BOX OVERLAP
-    # ==========================================================
-
-    def _bbox_overlap_ratio(
-        self,
-        block_bbox,
-        table_bbox,
-    ) -> float:
-        ax0, ay0, ax1, ay1 = (
-            block_bbox
-        )
-
-        bx0, by0, bx1, by1 = (
-            table_bbox
-        )
-
-        intersection_width = max(
-            0.0,
-            min(
-                ax1,
-                bx1,
-            )
-            - max(
-                ax0,
-                bx0,
-            ),
-        )
-
-        intersection_height = max(
-            0.0,
-            min(
-                ay1,
-                by1,
-            )
-            - max(
-                ay0,
-                by0,
-            ),
-        )
-
-        intersection_area = (
-            intersection_width
-            * intersection_height
-        )
-
-        block_width = max(
-            0.0,
-            ax1 - ax0,
-        )
-
-        block_height = max(
-            0.0,
-            ay1 - ay0,
-        )
-
-        block_area = (
-            block_width
-            * block_height
-        )
-
-        if block_area == 0:
-            return 0.0
-
-        return (
-            intersection_area
-            / block_area
-        )
-
-    # ==========================================================
-    # HEADING LEVEL DETECTION
-    # ==========================================================
-
-    def _get_heading_level(
-        self,
+        blocks: list[dict],
         *,
-        text: str,
-        font_size: float,
-        body_font_size: float,
-        bold: bool,
-    ) -> int | None:
-        # Long text is almost certainly a paragraph,
-        # not a heading.
-        if len(text) > 120:
+        page_count: int,
+    ) -> set[
+        tuple[str, str]
+    ]:
+
+        occurrences: dict[
+            tuple[str, str],
+            set[int],
+        ] = defaultdict(
+            set
+        )
+
+        for block in blocks:
+
+            if (
+                block.get(
+                    "kind"
+                )
+                != "text"
+            ):
+                continue
+
+            zone = (
+                self._get_margin_zone(
+                    block
+                )
+            )
+
+            if zone is None:
+                continue
+
+            signature = (
+                self
+                ._normalize_margin_signature(
+                    block.get(
+                        "text",
+                        "",
+                    )
+                )
+            )
+
+            if len(signature) < 3:
+                continue
+
+            occurrences[
+                (
+                    zone,
+                    signature,
+                )
+            ].add(
+                int(
+                    block[
+                        "page_number"
+                    ]
+                )
+            )
+
+        # Require at least three different pages.
+        #
+        # For large PDFs, 5% of the document is enough to
+        # identify a repeated running header/footer.
+        minimum_pages = max(
+            3,
+            math.ceil(
+                max(
+                    page_count,
+                    1,
+                )
+                * 0.05
+            ),
+        )
+
+        return {
+            key
+
+            for (
+                key,
+                pages,
+            )
+            in occurrences.items()
+
+            if len(
+                pages
+            )
+            >= minimum_pages
+        }
+
+    def _get_margin_zone(
+        self,
+        block: dict,
+    ) -> str | None:
+
+        bbox = block.get(
+            "bbox"
+        )
+
+        page_height = (
+            block.get(
+                "page_height"
+            )
+        )
+
+        if (
+            not bbox
+            or not page_height
+        ):
             return None
 
-        # ------------------------------------------------------
-        # LEVEL 1
-        #
-        # Example:
-        #
-        # Security Products and Features
-        # Security Guidance
-        # Compliance
-        #
-        # Typical:
-        # body ≈ 12
-        # heading ≈ 20
-        # ------------------------------------------------------
+        _, y0, _, y1 = bbox
 
         if (
-            font_size
-            >= body_font_size
-            * 1.60
+            y1
+            <=
+            page_height
+            * 0.12
         ):
-            return 1
-
-        # ------------------------------------------------------
-        # LEVEL 2
-        #
-        # Example:
-        #
-        # Infrastructure Security
-        # Data Encryption
-        # Identity and Access Control
-        #
-        # Typical:
-        # body ≈ 12
-        # heading ≈ 18
-        # ------------------------------------------------------
+            return "header"
 
         if (
-            font_size
-            >= body_font_size
-            * 1.38
+            y0
+            >=
+            page_height
+            * 0.88
         ):
-            return 2
-
-        # ------------------------------------------------------
-        # LEVEL 3
-        #
-        # Smaller bold labels.
-        #
-        # Example:
-        #
-        # Topics
-        # ------------------------------------------------------
-
-        if (
-            bold
-            and len(text) <= 80
-        ):
-            return 3
+            return "footer"
 
         return None
 
+    def _normalize_margin_signature(
+        self,
+        text: str,
+    ) -> str:
+
+        value = (
+            self
+            ._normalize_inline_text(
+                text
+            )
+            .casefold()
+        )
+
+        # Page 3 of 25
+        value = re.sub(
+            r"\bpage\s+\d+"
+            r"\s*(?:of\s+\d+)?\b",
+
+            "page #",
+
+            value,
+        )
+
+        # Infrastructure Security 4
+        #
+        # Appendix iv
+        value = re.sub(
+            r"\s+"
+            r"(?:\d+|[ivxlcdm]+)"
+            r"\s*$",
+
+            " #",
+
+            value,
+
+            flags=
+                re.IGNORECASE,
+        )
+
+        return value.strip()
+
     # ==========================================================
-    # HEADER / FOOTER / PAGE NUMBER CLEANUP
+    # HEADER / FOOTER / PAGE NUMBER FILTERING
     # ==========================================================
 
     def _is_noise(
         self,
         block: dict,
+        *,
+        repeated_margin_signatures: set[
+            tuple[str, str]
+        ],
     ) -> bool:
-        # Tables should never be filtered using text-based
-        # header/footer rules.
+
+        # Never remove tables with margin rules.
         if (
-            block.get("kind")
+            block.get(
+                "kind"
+            )
             == "table"
         ):
             return False
@@ -1000,69 +1439,700 @@ class PDFParser(BaseParser):
             "page_height"
         ]
 
-        font_sizes = block[
-            "font_sizes"
-        ]
-
-        font_size = (
-            max(font_sizes)
-            if font_sizes
-            else 0
+        font_sizes = block.get(
+            "font_sizes",
+            [],
         )
 
-        # ------------------------------------------------------
-        # RULE 1
+        font_size = (
+            max(
+                font_sizes
+            )
+            if font_sizes
+            else 0.0
+        )
+
+        # ------------------------------------------
         # Standalone page number
-        #
-        # Examples:
-        #
-        # 1
-        # 10
-        # iii
-        # iv
-        # ------------------------------------------------------
+        # ------------------------------------------
 
         if (
             PAGE_NUMBER_PATTERN
-            .fullmatch(text)
-            and y0
-            > page_height * 0.85
+            .fullmatch(
+                text
+            )
+
+            and
+            y0
+            >
+            page_height
+            * 0.82
         ):
             return True
 
-        # ------------------------------------------------------
-        # RULE 2
-        # Small page header
-        # ------------------------------------------------------
+        # ------------------------------------------
+        # Repeated running header / footer
+        # ------------------------------------------
+
+        zone = (
+            self._get_margin_zone(
+                block
+            )
+        )
+
+        if zone is not None:
+
+            signature = (
+                self
+                ._normalize_margin_signature(
+                    text
+                )
+            )
+
+            if (
+                (
+                    zone,
+                    signature,
+                )
+                in
+                repeated_margin_signatures
+            ):
+                return True
+
+        # ------------------------------------------
+        # Very conservative small top-margin noise.
+        #
+        # Repetition detection above handles most
+        # real running headers.
+        # ------------------------------------------
 
         if (
             y1
-            < page_height * 0.07
-            and font_size
-            <= 9.5
-            and len(text)
-            <= 150
+            <
+            page_height
+            * 0.045
+
+            and
+            font_size
+            <= 9.0
+
+            and
+            len(text)
+            <= 180
         ):
             return True
 
-        # ------------------------------------------------------
-        # RULE 3
-        # Small page footer
+        # ------------------------------------------
+        # Small footer text.
         #
-        # Examples:
-        #
-        # Infrastructure Security 4
-        # Monitoring and Logging 6
-        # ------------------------------------------------------
+        # Preserves body footnotes with normal
+        # 10-12pt text while removing tiny running
+        # footer labels.
+        # ------------------------------------------
 
         if (
             y0
-            > page_height * 0.90
-            and font_size
+            >
+            page_height
+            * 0.90
+
+            and
+            font_size
             <= 9.5
-            and len(text)
-            <= 150
+
+            and
+            len(text)
+            <= 180
         ):
             return True
 
         return False
+
+    # ==========================================================
+    # CAPTION DETECTION
+    # ==========================================================
+
+    def _get_caption_type(
+        self,
+        text: str,
+    ) -> str | None:
+
+        text = (
+            self
+            ._normalize_inline_text(
+                text
+            )
+        )
+
+        if (
+            TABLE_CAPTION_PATTERN
+            .match(
+                text
+            )
+        ):
+            return "table"
+
+        if (
+            FIGURE_CAPTION_PATTERN
+            .match(
+                text
+            )
+        ):
+            return "figure"
+
+        return None
+
+    # ==========================================================
+    # CONTROL / LIST DETECTION
+    # ==========================================================
+
+    def _looks_like_control_or_list(
+        self,
+        text: str,
+    ) -> bool:
+
+        text = (
+            self
+            ._normalize_inline_text(
+                text
+            )
+        )
+
+        return bool(
+            BULLET_PATTERN
+            .match(
+                text
+            )
+
+            or
+
+            CONTROL_ITEM_PATTERN
+            .match(
+                text
+            )
+        )
+
+    # ==========================================================
+    # HEADING DETECTION
+    # ==========================================================
+
+    def _get_heading_level(
+        self,
+        *,
+        text: str,
+        page_number: int,
+        font_size: float,
+        body_font_size: float,
+        bold: bool,
+        toc_levels: dict[
+            tuple[int, str],
+            int,
+        ],
+    ) -> int | None:
+
+        text = (
+            self
+            ._normalize_inline_text(
+                text
+            )
+        )
+
+        if (
+            not text
+            or len(text) > 120
+        ):
+            return None
+
+        # Figure and table captions are structure, but they are
+        # not document headings.
+        if (
+            self._get_caption_type(
+                text
+            )
+            is not None
+        ):
+            return None
+
+        # NIST controls / bullet lines should never alter the
+        # heading stack.
+        if (
+            self
+            ._looks_like_control_or_list(
+                text
+            )
+        ):
+            return None
+
+        # ------------------------------------------
+        # Strongest signal:
+        # real PDF outline/bookmark
+        # ------------------------------------------
+
+        toc_level = (
+            toc_levels.get(
+                (
+                    page_number,
+                    self
+                    ._normalize_match_text(
+                        text
+                    ),
+                )
+            )
+        )
+
+        if (
+            toc_level
+            is not None
+        ):
+            return toc_level
+
+        # Long full sentences are poor heading candidates.
+        if (
+            len(text) > 55
+            and
+            text.endswith(
+                (
+                    ".",
+                    ";",
+                )
+            )
+        ):
+            return None
+
+        # ------------------------------------------
+        # Level 1
+        # ------------------------------------------
+
+        if (
+            font_size
+            >=
+            body_font_size
+            * 1.60
+        ):
+            return 1
+
+        # ------------------------------------------
+        # Level 2
+        # ------------------------------------------
+
+        if (
+            font_size
+            >=
+            body_font_size
+            * 1.35
+        ):
+            return 2
+
+        if not bold:
+            return None
+
+        word_count = len(
+            text.split()
+        )
+
+        numbered_heading = bool(
+            re.match(
+                r"^\d+"
+                r"(?:\.\d+)*"
+                r"\.?\s+\S",
+
+                text,
+            )
+        )
+
+        # ------------------------------------------
+        # Level 3:
+        # numbered section
+        #
+        # 1. Overview
+        # 2.1 Risk Management
+        # ------------------------------------------
+
+        if (
+            numbered_heading
+
+            and
+            font_size
+            >=
+            body_font_size
+            * 0.95
+
+            and
+            len(text)
+            <= 100
+        ):
+            return 3
+
+        # ------------------------------------------
+        # Level 3:
+        # clearly larger bold label
+        # ------------------------------------------
+
+        if (
+            font_size
+            >=
+            body_font_size
+            * 1.08
+
+            and
+            len(text)
+            <= 80
+
+            and
+            word_count
+            <= 12
+        ):
+            return 3
+
+        # ------------------------------------------
+        # Level 3:
+        # very short bold body-size label
+        #
+        # Topics
+        # Preface
+        # Acknowledgments
+        # Note to Readers
+        #
+        # But NOT long controls / sentences.
+        # ------------------------------------------
+
+        if (
+            font_size
+            >=
+            body_font_size
+            * 0.95
+
+            and
+            len(text)
+            <= 35
+
+            and
+            word_count
+            <= 6
+
+            and
+            ":"
+            not in text
+        ):
+            return 3
+
+        return None
+
+    # ==========================================================
+    # TABLE NORMALIZATION
+    # ==========================================================
+
+    def _normalize_table_rows(
+        self,
+        rows: list,
+    ) -> list[list[str]]:
+
+        normalized: list[
+            list[str]
+        ] = []
+
+        for row in rows:
+
+            normalized_row: list[
+                str
+            ] = []
+
+            for cell in row:
+
+                value = (
+                    ""
+                    if cell is None
+                    else str(
+                        cell
+                    )
+                )
+
+                value = (
+                    self
+                    ._normalize_inline_text(
+                        value
+                    )
+                )
+
+                # Markdown escaping.
+                value = value.replace(
+                    "|",
+                    "\\|",
+                )
+
+                normalized_row.append(
+                    value
+                )
+
+            if any(
+                cell.strip()
+                for cell
+                in normalized_row
+            ):
+                normalized.append(
+                    normalized_row
+                )
+
+        if not normalized:
+            return []
+
+        max_columns = max(
+            len(row)
+            for row
+            in normalized
+        )
+
+        padded_rows = [
+            row
+            + [""] * (
+                max_columns
+                - len(row)
+            )
+
+            for row
+            in normalized
+        ]
+
+        # Remove structurally empty columns.
+        #
+        # This is what fixed the NIST 9-column table
+        # into its real 3-column representation.
+        columns_to_keep = [
+            column_index
+
+            for column_index
+            in range(
+                max_columns
+            )
+
+            if any(
+                row[
+                    column_index
+                ].strip()
+
+                for row
+                in padded_rows
+            )
+        ]
+
+        if not columns_to_keep:
+            return []
+
+        return [
+            [
+                row[
+                    column_index
+                ]
+
+                for column_index
+                in columns_to_keep
+            ]
+
+            for row
+            in padded_rows
+        ]
+
+    # ==========================================================
+    # TABLE -> MARKDOWN
+    # ==========================================================
+
+    def _table_to_markdown(
+        self,
+        rows: list[
+            list[str]
+        ],
+    ) -> str:
+
+        if not rows:
+            return ""
+
+        column_count = max(
+            len(row)
+            for row
+            in rows
+        )
+
+        if column_count == 0:
+            return ""
+
+        padded_rows = [
+            row
+            + [""] * (
+                column_count
+                - len(row)
+            )
+
+            for row
+            in rows
+        ]
+
+        lines = [
+            (
+                "| "
+                + " | ".join(
+                    padded_rows[0]
+                )
+                + " |"
+            ),
+            (
+                "| "
+                + " | ".join(
+                    ["---"]
+                    * column_count
+                )
+                + " |"
+            ),
+        ]
+
+        for row in padded_rows[
+            1:
+        ]:
+
+            lines.append(
+                "| "
+                + " | ".join(
+                    row
+                )
+                + " |"
+            )
+
+        return "\n".join(
+            lines
+        )
+
+    # ==========================================================
+    # BOUNDING BOX OVERLAP
+    # ==========================================================
+
+    def _bbox_overlap_ratio(
+        self,
+        block_bbox,
+        table_bbox,
+    ) -> float:
+
+        ax0, ay0, ax1, ay1 = (
+            block_bbox
+        )
+
+        bx0, by0, bx1, by1 = (
+            table_bbox
+        )
+
+        intersection_width = max(
+            0.0,
+            min(
+                ax1,
+                bx1,
+            )
+            -
+            max(
+                ax0,
+                bx0,
+            ),
+        )
+
+        intersection_height = max(
+            0.0,
+            min(
+                ay1,
+                by1,
+            )
+            -
+            max(
+                ay0,
+                by0,
+            ),
+        )
+
+        intersection_area = (
+            intersection_width
+            *
+            intersection_height
+        )
+
+        block_area = (
+            max(
+                0.0,
+                ax1 - ax0,
+            )
+            *
+            max(
+                0.0,
+                ay1 - ay0,
+            )
+        )
+
+        if block_area == 0:
+            return 0.0
+
+        return (
+            intersection_area
+            /
+            block_area
+        )
+
+    # ==========================================================
+    # TEXT NORMALIZATION
+    # ==========================================================
+
+    def _normalize_inline_text(
+        self,
+        value: str,
+    ) -> str:
+
+        value = (
+            unicodedata.normalize(
+                "NFKC",
+                str(
+                    value
+                ),
+            )
+        )
+
+        # Remove invisible Unicode format characters.
+        value = "".join(
+            char
+
+            for char
+            in value
+
+            if (
+                unicodedata.category(
+                    char
+                )
+                != "Cf"
+            )
+        )
+
+        value = (
+            value
+            .replace(
+                "\r",
+                " ",
+            )
+            .replace(
+                "\n",
+                " ",
+            )
+        )
+
+        value = re.sub(
+            r"\s+",
+            " ",
+            value,
+        )
+
+        return value.strip()
+
+    def _normalize_match_text(
+        self,
+        value: str,
+    ) -> str:
+
+        return (
+            self
+            ._normalize_inline_text(
+                value
+            )
+            .casefold()
+        )
