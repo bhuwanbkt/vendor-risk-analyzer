@@ -13,12 +13,17 @@ from vendor_risk_analyzer.ingestion.parsers.pdf import (
 
 from vendor_risk_analyzer.ingestion.parsers.docx import DOCXParser
 
+from vendor_risk_analyzer.ingestion.parsers.csv import CSVParser
+from vendor_risk_analyzer.ingestion.parsers.xlsx import XLSXParser
+
 
 PARSERS: list[BaseParser] = [
     TextParser(),
     MarkdownParser(),
     PDFParser(),
     DOCXParser(),
+    CSVParser(),
+    XLSXParser(),
 ]
 
 
