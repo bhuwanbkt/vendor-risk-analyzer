@@ -10,7 +10,12 @@ from vendor_risk_analyzer.ingestion.parsers.base import ParsedElement
 
 
 MAX_DATA_ROWS_PER_ELEMENT = 20
-MAX_TABLE_CHARS = 3200
+
+# Keep the fully rendered retrieval table comfortably below the
+# shared chunker's 1,200-character text target. XLSX table titles
+# are prepended by the chunker as captions, so the title length is
+# reserved inside this budget too.
+MAX_TABLE_CHARS = 1100
 
 
 @dataclass(slots=True)
@@ -64,6 +69,7 @@ def rows_to_table_elements(
         groups = _group_rows(
             header,
             data_rows,
+            caption=title,
         )
 
         part_count = len(groups)
@@ -117,6 +123,15 @@ def rows_to_table_elements(
                     header_row_number
                 )
 
+            retrieval_char_count = (
+                len(content)
+                + (
+                    len(title) + 2
+                    if title
+                    else 0
+                )
+            )
+
             metadata: dict[str, Any] = {
                 **metadata_base,
                 "source_format":
@@ -145,6 +160,13 @@ def rows_to_table_elements(
                     source_row_end,
                 "is_continuation":
                     part_index > 1,
+                "table_content_chars":
+                    len(content),
+                "retrieval_char_estimate":
+                    retrieval_char_count,
+                "exceeds_table_char_budget":
+                    retrieval_char_count
+                    > MAX_TABLE_CHARS,
             }
 
             if sheet_name:
@@ -429,7 +451,24 @@ def _normalize_headers(
 def _group_rows(
     header: list[str],
     data_rows: list[TabularRow],
+    *,
+    caption: str | None = None,
 ) -> list[list[TabularRow]]:
+    """
+    Split table data using the *rendered retrieval size*, not only
+    a row-count threshold.
+
+    The shared chunker keeps tables atomic and, when present,
+    prepends ``caption`` plus a blank line. Reserving that exact
+    overhead here keeps normal table chunks below the configured
+    character budget.
+
+    A single source row is never split across multiple table
+    elements. If one individual row is larger than the entire
+    budget, it is isolated in its own part and the metadata flag
+    ``exceeds_table_char_budget`` makes that edge case observable.
+    """
+
     if not data_rows:
         return [[]]
 
@@ -442,9 +481,22 @@ def _group_rows(
         )
     )
 
-    current_chars = header_chars
+    caption_chars = (
+        len(caption) + 2
+        if caption
+        else 0
+    )
+
+    base_chars = (
+        header_chars
+        + caption_chars
+    )
+
+    current_chars = base_chars
 
     for row in data_rows:
+        # +1 accounts for the newline inserted before each data row
+        # in the final Markdown table.
         row_chars = len(
             _markdown_row(
                 row.values
@@ -457,7 +509,7 @@ def _group_rows(
         )
 
         would_exceed_chars = (
-            current
+            bool(current)
             and
             current_chars
             + row_chars
@@ -471,7 +523,7 @@ def _group_rows(
         ):
             groups.append(current)
             current = []
-            current_chars = header_chars
+            current_chars = base_chars
 
         current.append(row)
         current_chars += row_chars

@@ -43,7 +43,7 @@ class XLSXParser(BaseParser):
         "xlsx",
     }
 
-    parser_version = "1.0"
+    parser_version = "1.1"
 
     def parse(
         self,

@@ -30,7 +30,7 @@ class CSVParser(BaseParser):
         "csv",
     }
 
-    parser_version = "1.0"
+    parser_version = "1.1"
 
     def parse(
         self,
