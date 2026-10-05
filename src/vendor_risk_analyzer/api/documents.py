@@ -31,6 +31,9 @@ from vendor_risk_analyzer.storage.client import (
     generate_upload_url,
     get_object_metadata,
 )
+from vendor_risk_analyzer.ingestion.service import (
+    ingest_document,
+)
 
 
 router = APIRouter(
@@ -238,3 +241,65 @@ async def list_documents(
     )
 
     return result.scalars().all()
+
+@router.post(
+    "/{vendor_id}/documents/{document_id}/ingest",
+    response_model=DocumentResponse,
+)
+async def ingest_uploaded_document(
+    vendor_id: UUID,
+    document_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(
+        require_roles(
+            "analyst",
+            "admin",
+        )
+    ),
+    _: None = Depends(verify_csrf),
+):
+    result = await db.execute(
+        select(Document).where(
+            Document.id == document_id,
+            Document.vendor_id == vendor_id,
+        )
+    )
+
+    document = result.scalar_one_or_none()
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found",
+        )
+
+    if document.status not in {
+        "uploaded",
+        "parsed",
+        "failed",
+    }:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Document is not ready "
+                "for ingestion"
+            ),
+        )
+
+    try:
+        return await ingest_document(
+            document=document,
+            db=db,
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Document ingestion failed",
+        ) from exc
