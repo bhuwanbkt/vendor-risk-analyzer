@@ -1,3 +1,4 @@
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
@@ -33,20 +34,44 @@ async def callback(request: Request):
             detail="Authentication failed",
         ) from exc
 
-    user = token.get("userinfo")
+    access_token = token.get("access_token")
 
-    if not user:
+    if not access_token:
         raise HTTPException(
             status_code=401,
-            detail="User information was not returned",
+            detail="Access token was not returned",
         )
 
-    # Store only the minimum identity information.
-    # Do NOT store access/ID tokens in the cookie.
+    userinfo_url = (
+        f"{settings.zitadel_issuer.rstrip('/')}"
+        "/oidc/v1/userinfo"
+    )
+
+    async with httpx.AsyncClient(
+        timeout=10.0,
+    ) as client:
+        response = await client.get(
+            userinfo_url,
+            headers={
+                "Authorization": f"Bearer {access_token}"
+            },
+        )
+
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=401,
+            detail="Unable to retrieve user information",
+        )
+
+    user = response.json()
+
     request.session["user"] = {
         "sub": user.get("sub"),
         "name": user.get("name"),
         "email": user.get("email"),
+        "preferred_username": user.get(
+            "preferred_username"
+        ),
     }
 
     return RedirectResponse(

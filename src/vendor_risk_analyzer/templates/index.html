@@ -17,7 +17,14 @@
             {% if user %}
                 <span>
                     Signed in as
-                    <strong>{{ user.name or user.email }}</strong>
+                    <strong>
+                        {{
+                            user.name
+                            or user.email
+                            or user.preferred_username
+                            or user.sub
+                        }}
+                    </strong>
                 </span>
 
                 <a href="/auth/logout">
