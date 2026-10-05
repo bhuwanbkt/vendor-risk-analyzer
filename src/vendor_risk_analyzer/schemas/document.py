@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 MAX_FILE_SIZE = 25 * 1024 * 1024
@@ -72,6 +72,10 @@ class DocumentUploadResponse(BaseModel):
 
 
 class DocumentResponse(BaseModel):
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
     id: UUID
     vendor_id: UUID
     filename: str

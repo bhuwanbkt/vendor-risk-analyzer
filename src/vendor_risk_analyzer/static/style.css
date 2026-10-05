@@ -164,3 +164,37 @@ body {
     font-size: 14px;
     font-weight: bold;
 }
+
+.document-section {
+    margin-top: 40px;
+}
+
+.document-upload-card,
+.document-list-card {
+    background: white;
+    border-radius: 10px;
+    padding: 24px;
+    margin-top: 20px;
+
+    box-shadow:
+        0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.document-upload-card form {
+    display: grid;
+    gap: 12px;
+}
+
+.document-upload-card input,
+.document-upload-card select {
+    padding: 10px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+}
+
+.document-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 16px 0;
+    border-bottom: 1px solid #e5e7eb;
+}

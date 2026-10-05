@@ -153,7 +153,67 @@
             </div>
 
         </section>
+        ----
+        <section class="document-section">
 
+            <h2>Vendor Documents</h2>
+
+            {% if "admin" in user.roles or "analyst" in user.roles %}
+
+            <div class="document-upload-card">
+
+                <h3>Upload Document</h3>
+
+                <form
+                    id="document-upload-form"
+                    data-csrf-token="{{ csrf_token }}"
+                >
+
+                    <label for="document-vendor">
+                        Vendor
+                    </label>
+
+                    <select
+                        id="document-vendor"
+                        required
+                    >
+                        <option value="">
+                            Select vendor
+                        </option>
+                    </select>
+
+                    <label for="document-file">
+                        Document
+                    </label>
+
+                    <input
+                        id="document-file"
+                        type="file"
+                        accept=".pdf,.docx,.xlsx,.csv,.txt,.md"
+                        required
+                    >
+
+                    <button type="submit">
+                        Upload Document
+                    </button>
+
+                    <p id="document-upload-message"></p>
+
+                </form>
+
+            </div>
+
+            {% endif %}
+
+            <div class="document-list-card">
+                <h3>Documents</h3>
+
+                <div id="document-list">
+                    Select a vendor to view documents.
+                </div>
+            </div>
+
+        </section>
         {% endif %}
 
         <section class="system">
