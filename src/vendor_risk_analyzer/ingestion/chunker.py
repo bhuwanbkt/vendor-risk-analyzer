@@ -1,4 +1,7 @@
-from dataclasses import dataclass, field
+from dataclasses import (
+    dataclass,
+    field,
+)
 from typing import Any
 
 from vendor_risk_analyzer.ingestion.parsers.base import (
@@ -9,6 +12,7 @@ from vendor_risk_analyzer.ingestion.parsers.base import (
 @dataclass(slots=True)
 class ParsedChunk:
     content: str
+
     source_sequences: list[int]
 
     source_element_ids: list[str] = field(
@@ -26,15 +30,28 @@ def create_chunks(
     overlap_elements: int = 1,
 ) -> list[ParsedChunk]:
 
-    chunks: list[ParsedChunk] = []
+    chunks: list[
+        ParsedChunk
+    ] = []
 
-    current_parts: list[str] = []
-    current_sequences: list[int] = []
+    current_parts: list[
+        str
+    ] = []
 
-    current_heading_path: list[str] = []
+    current_sequences: list[
+        int
+    ] = []
 
+    current_heading_path: list[
+        str
+    ] = []
+
+    # ==========================================================
+    # SAVE CURRENT TEXT CHUNK
+    # ==========================================================
 
     def save_chunk() -> None:
+
         if not current_parts:
             return
 
@@ -54,22 +71,32 @@ def create_chunks(
 
                     "overlap_elements":
                         overlap_elements,
+
+                    "element_type":
+                        "text",
                 },
             )
         )
 
+    # ==========================================================
+    # PROCESS ELEMENTS
+    # ==========================================================
 
     for sequence, element in enumerate(
         elements
     ):
 
-        # ----------------------------------------------------
-        # Heading boundary
-        # ----------------------------------------------------
+        # ======================================================
+        # HEADING
+        #
+        # Close existing chunk.
+        # Don't overlap across section boundaries.
+        # ======================================================
 
-        if element.element_type == "heading":
-
-            # Do not overlap content across unrelated sections.
+        if (
+            element.element_type
+            == "heading"
+        ):
             save_chunk()
 
             current_parts.clear()
@@ -81,35 +108,90 @@ def create_chunks(
 
             continue
 
+        # ======================================================
+        # TABLE
+        #
+        # Tables become standalone semantic chunks.
+        #
+        # We do not overlap paragraph text into/out of tables.
+        # ======================================================
 
-        text = element.content.strip()
+        if (
+            element.element_type
+            == "table"
+        ):
+            save_chunk()
+
+            current_parts.clear()
+            current_sequences.clear()
+
+            table_heading_path = (
+                element.heading_path.copy()
+                if element.heading_path
+                else
+                current_heading_path.copy()
+            )
+
+            chunks.append(
+                ParsedChunk(
+                    content=
+                        element.content,
+
+                    source_sequences=[
+                        sequence
+                    ],
+
+                    metadata={
+                        "heading_path":
+                            table_heading_path,
+
+                        "element_type":
+                            "table",
+
+                        "overlap_elements":
+                            0,
+
+                        "page_number":
+                            element.page_number,
+
+                        **element.metadata,
+                    },
+                )
+            )
+
+            current_heading_path[:] = (
+                table_heading_path
+            )
+
+            continue
+
+        # ======================================================
+        # NORMAL TEXT / PARAGRAPH
+        # ======================================================
+
+        text = (
+            element.content
+            .strip()
+        )
 
         if not text:
             continue
 
-
-        # ----------------------------------------------------
-        # Check whether adding this element exceeds chunk size
-        # ----------------------------------------------------
-
         candidate = "\n\n".join(
-            current_parts + [text]
+            current_parts
+            + [text]
         )
 
+        # ======================================================
+        # CHUNK LIMIT REACHED
+        # ======================================================
 
         if (
             current_parts
-            and len(candidate) > max_chars
+            and len(candidate)
+            > max_chars
         ):
-
-            # Save the completed chunk.
             save_chunk()
-
-
-            # -----------------------------------------------
-            # Preserve the last N source elements
-            # as overlap for the next chunk.
-            # -----------------------------------------------
 
             overlap_parts = (
                 current_parts[
@@ -127,17 +209,18 @@ def create_chunks(
                 else []
             )
 
-
-            # Make sure overlap + new element
-            # still fits reasonably within max_chars.
-            overlap_candidate = "\n\n".join(
-                overlap_parts + [text]
+            overlap_candidate = (
+                "\n\n".join(
+                    overlap_parts
+                    + [text]
+                )
             )
-
 
             if (
                 overlap_parts
-                and len(overlap_candidate)
+                and len(
+                    overlap_candidate
+                )
                 <= max_chars
             ):
                 current_parts[:] = (
@@ -152,25 +235,23 @@ def create_chunks(
                 current_parts.clear()
                 current_sequences.clear()
 
-
-        # ----------------------------------------------------
-        # Add current source element
-        # ----------------------------------------------------
-
-        current_parts.append(text)
+        current_parts.append(
+            text
+        )
 
         current_sequences.append(
             sequence
         )
-
 
         if element.heading_path:
             current_heading_path[:] = (
                 element.heading_path
             )
 
+    # ==========================================================
+    # FINAL CHUNK
+    # ==========================================================
 
-    # Save final chunk.
     save_chunk()
 
     return chunks
