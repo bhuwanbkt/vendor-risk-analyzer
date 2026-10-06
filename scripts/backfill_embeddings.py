@@ -5,7 +5,12 @@ import asyncio
 import json
 import os
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import (
+    parse_qsl,
+    urlencode,
+    urlsplit,
+    urlunsplit,
+)
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -17,12 +22,17 @@ from vendor_risk_analyzer.embeddings.service import (
 )
 
 
+# ============================================================
+# Database configuration
+# ============================================================
+
+
 def get_database_url() -> str:
     """
-    Read DATABASE_URL directly from the environment.
+    Read DATABASE_URL directly.
 
-    This script does not load the application's complete Settings
-    because it only needs database and embedding configuration.
+    This worker does not need the complete application settings
+    such as ZITADEL, object storage, or session configuration.
     """
 
     database_url = os.getenv("DATABASE_URL")
@@ -32,17 +42,23 @@ def get_database_url() -> str:
             "DATABASE_URL is required."
         )
 
-    return normalize_database_url(database_url)
+    return normalize_database_url(
+        database_url
+    )
 
 
-def normalize_database_url(database_url: str) -> str:
+def normalize_database_url(
+    database_url: str,
+) -> str:
     """
     Normalize a Neon PostgreSQL URL for SQLAlchemy + asyncpg.
     """
 
     database_url = database_url.strip()
 
-    if database_url.startswith("postgres://"):
+    if database_url.startswith(
+        "postgres://"
+    ):
         database_url = database_url.replace(
             "postgres://",
             "postgresql://",
@@ -67,7 +83,9 @@ def normalize_database_url(database_url: str) -> str:
             1,
         )
 
-    parsed = urlsplit(database_url)
+    parsed = urlsplit(
+        database_url
+    )
 
     query_params = dict(
         parse_qsl(
@@ -77,27 +95,22 @@ def normalize_database_url(database_url: str) -> str:
     )
 
     # Neon may provide channel_binding.
-    # asyncpg does not need it here.
     query_params.pop(
         "channel_binding",
         None,
     )
 
-    # Convert:
-    #
-    # sslmode=require
-    #
-    # to:
-    #
-    # ssl=require
-    #
+    # Convert sslmode=require to ssl=require
     # for asyncpg.
     sslmode = query_params.pop(
         "sslmode",
         None,
     )
 
-    if sslmode and "ssl" not in query_params:
+    if (
+        sslmode
+        and "ssl" not in query_params
+    ):
         query_params["ssl"] = sslmode
 
     query_params.setdefault(
@@ -116,11 +129,16 @@ def normalize_database_url(database_url: str) -> str:
     )
 
 
+# ============================================================
+# Metadata helpers
+# ============================================================
+
+
 def normalize_metadata(
     value: Any,
 ) -> dict[str, Any]:
     """
-    Convert metadata into a normal Python dictionary.
+    Return metadata as a normal Python dictionary.
     """
 
     if isinstance(value, dict):
@@ -128,9 +146,14 @@ def normalize_metadata(
 
     if isinstance(value, str):
         try:
-            parsed = json.loads(value)
+            parsed = json.loads(
+                value
+            )
 
-            if isinstance(parsed, dict):
+            if isinstance(
+                parsed,
+                dict,
+            ):
                 return parsed
 
         except json.JSONDecodeError:
@@ -146,7 +169,6 @@ def build_embedding_title(
     Build structural context for the embedding.
 
     Priority:
-
         heading_path
         table_title
         caption
@@ -157,7 +179,10 @@ def build_embedding_title(
         "heading_path"
     )
 
-    if isinstance(heading_path, list):
+    if isinstance(
+        heading_path,
+        list,
+    ):
         clean_headings = [
             str(value).strip()
             for value in heading_path
@@ -174,9 +199,14 @@ def build_embedding_title(
         "caption",
         "sheet_name",
     ):
-        value = metadata.get(key)
+        value = metadata.get(
+            key
+        )
 
-        if isinstance(value, str):
+        if isinstance(
+            value,
+            str,
+        ):
             value = value.strip()
 
             if value:
@@ -189,21 +219,28 @@ def vector_to_pgvector_literal(
     embedding: list[float],
 ) -> str:
     """
-    Convert Python floats into pgvector text format.
+    Convert a Python list into pgvector text format.
 
     Example:
-
         [0.1,-0.2,0.3]
     """
 
     return (
         "["
         + ",".join(
-            format(value, ".10g")
+            format(
+                value,
+                ".10g",
+            )
             for value in embedding
         )
         + "]"
     )
+
+
+# ============================================================
+# Chunk queries
+# ============================================================
 
 
 async def fetch_chunks(
@@ -235,9 +272,11 @@ async def fetch_chunks(
 
     if document_id:
         sql += """
-            AND document_id = CAST(
-                :document_id AS uuid
-            )
+            AND document_id =
+                CAST(
+                    :document_id
+                    AS uuid
+                )
         """
 
         params["document_id"] = (
@@ -251,10 +290,15 @@ async def fetch_chunks(
         LIMIT :limit
     """
 
-    async with engine.connect() as connection:
-        result = await connection.execute(
-            text(sql),
-            params,
+    async with (
+        engine.connect()
+        as connection
+    ):
+        result = (
+            await connection.execute(
+                text(sql),
+                params,
+            )
         )
 
         return [
@@ -275,10 +319,10 @@ async def save_embedding(
     """
     Save exactly one embedding.
 
-    Each call uses its own database transaction.
+    Every chunk is committed independently.
 
-    This is intentional:
-    if chunk 20 later fails, chunks 1-19 remain committed.
+    This means that if a later chunk fails,
+    previously saved vectors remain safely stored.
     """
 
     embedding_literal = (
@@ -323,28 +367,38 @@ async def save_embedding(
             updated_at = NOW()
 
         WHERE
-            id = CAST(
-                :chunk_id
-                AS uuid
-            )
+            id =
+                CAST(
+                    :chunk_id
+                    AS uuid
+                )
 
             AND embedding IS NULL
         """
     )
 
-    async with engine.begin() as connection:
-        result = await connection.execute(
-            sql,
-            {
-                "embedding": (
-                    embedding_literal
-                ),
-                "chunk_id": chunk_id,
-                "embedding_model": model,
-                "embedding_dimensions": (
-                    dimensions
-                ),
-            },
+    async with (
+        engine.begin()
+        as connection
+    ):
+        result = (
+            await connection.execute(
+                sql,
+                {
+                    "embedding": (
+                        embedding_literal
+                    ),
+                    "chunk_id": (
+                        chunk_id
+                    ),
+                    "embedding_model": (
+                        model
+                    ),
+                    "embedding_dimensions": (
+                        dimensions
+                    ),
+                },
+            )
         )
 
         if result.rowcount != 1:
@@ -361,7 +415,8 @@ async def verify_embedding(
     chunk_id: str,
 ) -> dict[str, Any]:
     """
-    Verify that PostgreSQL contains the vector.
+    Verify that PostgreSQL contains the vector
+    and that the vector has the correct dimension.
     """
 
     sql = text(
@@ -379,23 +434,264 @@ async def verify_embedding(
 
         FROM document_chunks
 
-        WHERE id = CAST(
-            :chunk_id AS uuid
-        )
+        WHERE
+            id =
+                CAST(
+                    :chunk_id
+                    AS uuid
+                )
         """
     )
 
-    async with engine.connect() as connection:
-        result = await connection.execute(
-            sql,
-            {
-                "chunk_id": chunk_id,
-            },
+    async with (
+        engine.connect()
+        as connection
+    ):
+        result = (
+            await connection.execute(
+                sql,
+                {
+                    "chunk_id": (
+                        chunk_id
+                    ),
+                },
+            )
         )
 
-        row = result.mappings().one()
+        row = (
+            result
+            .mappings()
+            .one()
+        )
 
         return dict(row)
+
+
+# ============================================================
+# Document lifecycle
+# ============================================================
+
+
+async def update_document_status(
+    engine,
+    *,
+    document_id: str,
+    status: str,
+) -> None:
+    """
+    Update the lifecycle status for one document.
+
+    Supported lifecycle values used by this worker:
+
+        embedding_pending
+        embedding
+        ready
+        embedding_failed
+    """
+
+    sql = text(
+        """
+        UPDATE documents
+        SET
+            status = CAST(
+                :status
+                AS varchar
+            ),
+            updated_at = NOW()
+
+        WHERE
+            id =
+                CAST(
+                    :document_id
+                    AS uuid
+                )
+        """
+    )
+
+    async with (
+        engine.begin()
+        as connection
+    ):
+        result = (
+            await connection.execute(
+                sql,
+                {
+                    "document_id": (
+                        document_id
+                    ),
+                    "status": status,
+                },
+            )
+        )
+
+        if result.rowcount != 1:
+            raise RuntimeError(
+                "Expected to update exactly "
+                "one document status, "
+                f"but updated {result.rowcount}."
+            )
+
+
+async def get_document_embedding_state(
+    engine,
+    *,
+    document_id: str,
+) -> dict[str, int]:
+    """
+    Return embedding progress for one document.
+
+    Example:
+
+        total_chunks = 20
+        embedded_chunks = 18
+        missing_embeddings = 2
+    """
+
+    sql = text(
+        """
+        SELECT
+            COUNT(*) AS total_chunks,
+
+            COUNT(embedding)
+                AS embedded_chunks,
+
+            COUNT(*)
+            - COUNT(embedding)
+                AS missing_embeddings
+
+        FROM document_chunks
+
+        WHERE
+            document_id =
+                CAST(
+                    :document_id
+                    AS uuid
+                )
+        """
+    )
+
+    async with (
+        engine.connect()
+        as connection
+    ):
+        result = (
+            await connection.execute(
+                sql,
+                {
+                    "document_id": (
+                        document_id
+                    ),
+                },
+            )
+        )
+
+        row = (
+            result
+            .mappings()
+            .one()
+        )
+
+    return {
+        "total_chunks": int(
+            row["total_chunks"]
+        ),
+        "embedded_chunks": int(
+            row["embedded_chunks"]
+        ),
+        "missing_embeddings": int(
+            row["missing_embeddings"]
+        ),
+    }
+
+
+async def finalize_document(
+    engine,
+    *,
+    document_id: str,
+) -> str:
+    """
+    Decide the correct lifecycle status after
+    successful processing.
+
+    ready
+        Every chunk has an embedding.
+
+    embedding_pending
+        Some chunks still require embeddings.
+
+    A document with zero chunks is never marked ready.
+    """
+
+    state = (
+        await get_document_embedding_state(
+            engine,
+            document_id=document_id,
+        )
+    )
+
+    total_chunks = state[
+        "total_chunks"
+    ]
+
+    missing_embeddings = state[
+        "missing_embeddings"
+    ]
+
+    if (
+        total_chunks > 0
+        and missing_embeddings == 0
+    ):
+        status = "ready"
+
+    else:
+        status = (
+            "embedding_pending"
+        )
+
+    await update_document_status(
+        engine,
+        document_id=document_id,
+        status=status,
+    )
+
+    return status
+
+
+async def mark_document_failed(
+    engine,
+    *,
+    document_id: str,
+) -> None:
+    """
+    Best-effort transition to embedding_failed.
+
+    If the database itself is unavailable,
+    we print the status-update failure without
+    hiding the original embedding error.
+    """
+
+    try:
+        await update_document_status(
+            engine,
+            document_id=document_id,
+            status="embedding_failed",
+        )
+
+    except Exception as exc:
+        print(
+            "WARNING: Could not mark "
+            "document as embedding_failed."
+        )
+
+        print(
+            f"{type(exc).__name__}: "
+            f"{exc}"
+        )
+
+
+# ============================================================
+# Global counts
+# ============================================================
 
 
 async def count_embeddings(
@@ -409,50 +705,70 @@ async def count_embeddings(
         remaining chunks
     """
 
-    async with engine.connect() as connection:
-        result = await connection.execute(
-            text(
-                """
-                SELECT
-                    COUNT(*)
-                        AS total_chunks,
+    async with (
+        engine.connect()
+        as connection
+    ):
+        result = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT
+                        COUNT(*)
+                            AS total_chunks,
 
-                    COUNT(embedding)
-                        AS embedded_chunks,
+                        COUNT(embedding)
+                            AS embedded_chunks,
 
-                    COUNT(*)
-                    - COUNT(embedding)
-                        AS remaining_chunks
+                        COUNT(*)
+                        - COUNT(embedding)
+                            AS remaining_chunks
 
-                FROM document_chunks
-                """
+                    FROM document_chunks
+                    """
+                )
             )
         )
 
-        row = result.mappings().one()
+        row = (
+            result
+            .mappings()
+            .one()
+        )
 
     return (
-        int(row["total_chunks"]),
-        int(row["embedded_chunks"]),
-        int(row["remaining_chunks"]),
+        int(
+            row["total_chunks"]
+        ),
+        int(
+            row["embedded_chunks"]
+        ),
+        int(
+            row["remaining_chunks"]
+        ),
     )
+
+
+# ============================================================
+# Main worker
+# ============================================================
 
 
 async def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Safely backfill Gemini embeddings "
-            "for document_chunks."
+            "and maintain document lifecycle state."
         )
     )
 
     parser.add_argument(
         "--limit",
         type=int,
-        default=25,
+        default=50,
         help=(
-            "Maximum number of NULL-embedding "
-            "chunks to process."
+            "Maximum number of chunks "
+            "with NULL embeddings to process."
         ),
     )
 
@@ -462,8 +778,8 @@ async def main() -> int:
         default=None,
         help=(
             "Optional document UUID. "
-            "If supplied, only that document "
-            "is processed."
+            "When supplied, only that "
+            "document is processed."
         ),
     )
 
@@ -471,9 +787,10 @@ async def main() -> int:
         "--write",
         action="store_true",
         help=(
-            "Save generated embeddings to "
-            "PostgreSQL. Without this flag "
-            "the script is a dry run."
+            "Save generated embeddings "
+            "and update document statuses. "
+            "Without this flag the script "
+            "is a dry run."
         ),
     )
 
@@ -482,8 +799,8 @@ async def main() -> int:
         type=float,
         default=4.0,
         help=(
-            "Seconds to wait between Gemini "
-            "embedding requests."
+            "Seconds to wait between "
+            "Gemini embedding requests."
         ),
     )
 
@@ -499,12 +816,16 @@ async def main() -> int:
             "--delay-seconds cannot be negative."
         )
 
-    database_url = get_database_url()
+    database_url = (
+        get_database_url()
+    )
 
-    engine = create_async_engine(
-        database_url,
-        poolclass=NullPool,
-        pool_pre_ping=True,
+    engine = (
+        create_async_engine(
+            database_url,
+            poolclass=NullPool,
+            pool_pre_ping=True,
+        )
     )
 
     embedding_service = (
@@ -514,6 +835,12 @@ async def main() -> int:
     processed = 0
     saved = 0
     failed = False
+
+    active_document_id: (
+        str | None
+    ) = None
+
+    active_document_failed = False
 
     try:
         (
@@ -526,10 +853,11 @@ async def main() -> int:
 
         print()
         print(
-            "Embedding backfill"
+            "Embedding worker"
         )
+
         print(
-            "=================="
+            "=============================="
         )
 
         print(
@@ -562,6 +890,12 @@ async def main() -> int:
             f"{args.delay_seconds} seconds"
         )
 
+        if args.document_id:
+            print(
+                f"Document filter:   "
+                f"{args.document_id}"
+            )
+
         print()
 
         chunks = await fetch_chunks(
@@ -572,18 +906,118 @@ async def main() -> int:
             ),
         )
 
+        # ----------------------------------------------------
+        # Nothing to process
+        # ----------------------------------------------------
+
         if not chunks:
             print(
                 "No chunks with NULL "
                 "embeddings were found."
             )
 
+            # If a specific document was requested,
+            # verify whether it can safely be marked ready.
+            if (
+                args.write
+                and args.document_id
+            ):
+                state = (
+                    await get_document_embedding_state(
+                        engine,
+                        document_id=(
+                            args.document_id
+                        ),
+                    )
+                )
+
+                if (
+                    state["total_chunks"] > 0
+                    and state[
+                        "missing_embeddings"
+                    ] == 0
+                ):
+                    await update_document_status(
+                        engine,
+                        document_id=(
+                            args.document_id
+                        ),
+                        status="ready",
+                    )
+
+                    print(
+                        "Document verified and "
+                        "marked ready."
+                    )
+
             return 0
+
+        # ----------------------------------------------------
+        # Process selected chunks
+        # ----------------------------------------------------
 
         for index, chunk in enumerate(
             chunks,
             start=1,
         ):
+            document_id = str(
+                chunk["document_id"]
+            )
+
+            # ------------------------------------------------
+            # Document transition
+            # ------------------------------------------------
+
+            if (
+                document_id
+                != active_document_id
+            ):
+                # We are moving to a different document.
+                # Finalize the previous document first.
+                if (
+                    active_document_id
+                    is not None
+                    and args.write
+                    and not active_document_failed
+                ):
+                    previous_status = (
+                        await finalize_document(
+                            engine,
+                            document_id=(
+                                active_document_id
+                            ),
+                        )
+                    )
+
+                    print()
+                    print(
+                        "Previous document status: "
+                        f"{previous_status}"
+                    )
+                    print()
+
+                active_document_id = (
+                    document_id
+                )
+
+                active_document_failed = (
+                    False
+                )
+
+                if args.write:
+                    await update_document_status(
+                        engine,
+                        document_id=(
+                            document_id
+                        ),
+                        status="embedding",
+                    )
+
+                    print()
+                    print(
+                        "Document status: embedding"
+                    )
+
             metadata = (
                 normalize_metadata(
                     chunk["metadata"]
@@ -624,7 +1058,7 @@ async def main() -> int:
 
             print(
                 f"Document ID: "
-                f"{chunk['document_id']}"
+                f"{document_id}"
             )
 
             print(
@@ -658,7 +1092,13 @@ async def main() -> int:
                     f"{len(embedding)}"
                 )
 
-                if args.write:
+                if not args.write:
+                    print(
+                        "DRY RUN: embedding "
+                        "was NOT written."
+                    )
+
+                else:
                     await save_embedding(
                         engine,
                         chunk_id=(
@@ -697,8 +1137,9 @@ async def main() -> int:
                         != embedding_service.dimensions
                     ):
                         raise RuntimeError(
-                            "Database vector dimension "
-                            "verification failed."
+                            "Database vector "
+                            "dimension verification "
+                            "failed."
                         )
 
                     saved += 1
@@ -712,14 +1153,32 @@ async def main() -> int:
                         f"{verification['dimensions']}"
                     )
 
-                else:
-                    print(
-                        "DRY RUN: embedding was "
-                        "NOT written."
+                    document_state = (
+                        await get_document_embedding_state(
+                            engine,
+                            document_id=(
+                                document_id
+                            ),
+                        )
                     )
+
+                    print(
+                        "Document embedding progress: "
+                        f"{document_state['embedded_chunks']}"
+                        "/"
+                        f"{document_state['total_chunks']}"
+                    )
+
+            # ------------------------------------------------
+            # Embedding provider failure
+            # ------------------------------------------------
 
             except EmbeddingError as exc:
                 failed = True
+
+                active_document_failed = (
+                    True
+                )
 
                 print()
                 print(
@@ -731,6 +1190,19 @@ async def main() -> int:
                     f"{exc}"
                 )
 
+                if args.write:
+                    await mark_document_failed(
+                        engine,
+                        document_id=(
+                            document_id
+                        ),
+                    )
+
+                    print(
+                        "Document status: "
+                        "embedding_failed"
+                    )
+
                 print()
                 print(
                     "Stopping the batch safely."
@@ -743,8 +1215,16 @@ async def main() -> int:
 
                 break
 
+            # ------------------------------------------------
+            # Database / unexpected failure
+            # ------------------------------------------------
+
             except Exception as exc:
                 failed = True
+
+                active_document_failed = (
+                    True
+                )
 
                 print()
                 print(
@@ -756,6 +1236,19 @@ async def main() -> int:
                     f"{exc}"
                 )
 
+                if args.write:
+                    await mark_document_failed(
+                        engine,
+                        document_id=(
+                            document_id
+                        ),
+                    )
+
+                    print(
+                        "Document status: "
+                        "embedding_failed"
+                    )
+
                 print()
                 print(
                     "Stopping the batch safely."
@@ -768,7 +1261,10 @@ async def main() -> int:
 
                 break
 
-            # Wait before the next Gemini request.
+            # ------------------------------------------------
+            # Provider pacing
+            # ------------------------------------------------
+
             if (
                 index < len(chunks)
                 and args.delay_seconds > 0
@@ -782,6 +1278,35 @@ async def main() -> int:
                 await asyncio.sleep(
                     args.delay_seconds
                 )
+
+        # ----------------------------------------------------
+        # Finalize last active document
+        # ----------------------------------------------------
+
+        if (
+            active_document_id
+            is not None
+            and args.write
+            and not active_document_failed
+        ):
+            final_status = (
+                await finalize_document(
+                    engine,
+                    document_id=(
+                        active_document_id
+                    ),
+                )
+            )
+
+            print()
+            print(
+                "Final document status: "
+                f"{final_status}"
+            )
+
+        # ----------------------------------------------------
+        # Final summary
+        # ----------------------------------------------------
 
         (
             total_after,
@@ -797,7 +1322,7 @@ async def main() -> int:
         )
 
         print(
-            "Backfill summary"
+            "Embedding worker summary"
         )
 
         print(
@@ -843,8 +1368,8 @@ async def main() -> int:
 
             print(
                 "Run the same command again "
-                "later to resume from the next "
-                "NULL embedding."
+                "to resume from chunks where "
+                "embedding IS NULL."
             )
 
             return 2
@@ -865,6 +1390,7 @@ async def main() -> int:
 
     finally:
         await embedding_service.close()
+
         await engine.dispose()
 
 
