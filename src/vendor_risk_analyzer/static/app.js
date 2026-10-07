@@ -586,72 +586,80 @@ async function loadDocuments(vendorId) {
         }
 
 
-    for (const doc of documents) {
-        const item =
-            window.document.createElement("div");
+        for (const doc of documents) {
+            const item =
+                window.document.createElement("div");
 
-        item.className = "document-item";
+            item.className = "document-item";
 
-        const fileSize =
-            formatFileSize(doc.size_bytes);
+            const fileSize =
+                formatFileSize(doc.size_bytes);
 
-        let actionButton = "";
+            let actionButton = "";
 
-        if (
-            documentForm &&
-            (
+            const canParse =
                 doc.status === "uploaded" ||
                 doc.status === "failed" ||
-                doc.status === "parsed"
-            )
-        ) {
-            const buttonText =
-                doc.status === "parsed"
-                    ? "Re-parse"
-                    : "Parse";
+                doc.status === "parsed" ||
+                doc.status === "embedding_pending" ||
+                doc.status === "embedding_failed" ||
+                doc.status === "ready";
 
-            actionButton = `
-                <button
-                    type="button"
-                    class="ingest-button"
-                    data-document-id="${escapeHtml(doc.id)}"
-                    data-vendor-id="${escapeHtml(doc.vendor_id)}"
-                >
-                    ${buttonText}
-                </button>
-            `;
-        }
+            if (
+                documentForm &&
+                canParse
+            ) {
+                const isReparse =
+                    doc.status !== "uploaded" &&
+                    doc.status !== "failed";
 
-        item.innerHTML = `
-            <div>
-                <strong>
-                    ${escapeHtml(doc.filename)}
-                </strong>
+                const buttonText =
+                    isReparse
+                        ? "Re-parse"
+                        : "Parse";
 
-                <div class="document-details">
-                    ${escapeHtml(
-                        doc.file_type.toUpperCase()
-                    )}
+                actionButton = `
+                    <button
+                        type="button"
+                        class="ingest-button"
+                        data-document-id="${escapeHtml(doc.id)}"
+                        data-vendor-id="${escapeHtml(doc.vendor_id)}"
+                    >
+                        ${buttonText}
+                    </button>
+                `;
+            }
 
-                    ${
-                        fileSize
-                            ? ` • ${escapeHtml(fileSize)}`
-                            : ""
-                    }
+            item.innerHTML = `
+                <div>
+                    <strong>
+                        ${escapeHtml(doc.filename)}
+                    </strong>
+
+                    <div class="document-details">
+                        ${escapeHtml(
+                            doc.file_type.toUpperCase()
+                        )}
+
+                        ${
+                            fileSize
+                                ? ` • ${escapeHtml(fileSize)}`
+                                : ""
+                        }
+                    </div>
                 </div>
-            </div>
 
-            <div class="document-actions">
-                <span class="document-status">
-                    ${escapeHtml(doc.status)}
-                </span>
+                <div class="document-actions">
+                    <span class="document-status">
+                        ${escapeHtml(doc.status)}
+                    </span>
 
-                ${actionButton}
-            </div>
-        `;
+                    ${actionButton}
+                </div>
+            `;
 
-        documentList.appendChild(item);
-    }
+            documentList.appendChild(item);
+        }
 
     } catch (error) {
         console.error(
@@ -663,6 +671,7 @@ async function loadDocuments(vendorId) {
             "Unable to load documents.";
     }
 }
+
 
 // ------------------------------------------------------------
 // Ingest Document
@@ -715,7 +724,7 @@ async function ingestDocument(
         }
 
         documentMessage.textContent =
-            "Document parsed successfully.";
+            "Document parsed successfully. Embedding pending.";
 
         await loadDocuments(
             vendorId
@@ -735,6 +744,7 @@ async function ingestDocument(
             originalText;
     }
 }
+
 
 if (documentList) {
     documentList.addEventListener(
@@ -763,6 +773,7 @@ if (documentList) {
         }
     );
 }
+
 
 // ------------------------------------------------------------
 // DOCUMENT VENDOR SELECT

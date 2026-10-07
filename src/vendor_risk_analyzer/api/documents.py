@@ -148,6 +148,7 @@ async def create_upload_url(
         expires_in=300,
     )
 
+
 @router.post(
     "/{vendor_id}/documents/{document_id}/complete",
     response_model=DocumentResponse,
@@ -215,6 +216,7 @@ async def complete_upload(
 
     return document
 
+
 @router.get(
     "/{vendor_id}/documents",
     response_model=list[DocumentResponse],
@@ -241,6 +243,7 @@ async def list_documents(
     )
 
     return result.scalars().all()
+
 
 @router.post(
     "/{vendor_id}/documents/{document_id}/ingest",
@@ -277,6 +280,9 @@ async def ingest_uploaded_document(
         "uploaded",
         "parsed",
         "failed",
+        "embedding_pending",
+        "embedding_failed",
+        "ready",
     }:
         raise HTTPException(
             status_code=409,
