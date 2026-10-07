@@ -98,6 +98,7 @@ async def ingest_document(
             )
 
             db.add(db_element)
+
             stored_elements.append(
                 db_element
             )
@@ -108,6 +109,11 @@ async def ingest_document(
         parsed_chunks = create_chunks(
             parsed_elements
         )
+
+        if not parsed_chunks:
+            raise ValueError(
+                "Document produced no retrieval chunks"
+            )
 
         for sequence, chunk in enumerate(
             parsed_chunks
@@ -148,7 +154,13 @@ async def ingest_document(
 
             db.add(db_chunk)
 
-        document.status = "parsed"
+        # Parsing and chunking succeeded.
+        #
+        # Embeddings are intentionally generated
+        # separately by the embedding worker.
+        document.status = (
+            "embedding_pending"
+        )
 
         document.parser_version = (
             parser.parser_version
@@ -165,7 +177,10 @@ async def ingest_document(
         }
 
         await db.commit()
-        await db.refresh(document)
+
+        await db.refresh(
+            document
+        )
 
         return document
 
