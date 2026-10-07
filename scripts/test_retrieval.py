@@ -21,7 +21,9 @@ from vendor_risk_analyzer.embeddings.service import (
     EmbeddingService,
 )
 from vendor_risk_analyzer.retrieval.service import (
+    DocumentNotFoundError,
     SemanticRetriever,
+    VendorNotFoundError,
 )
 
 
@@ -132,24 +134,24 @@ def normalize_database_url(
 async def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Test semantic retrieval "
-            "against pgvector."
+            "Test vendor-scoped semantic "
+            "retrieval against pgvector."
         )
     )
 
     parser.add_argument(
         "--query",
         required=True,
-        help="Natural-language search query.",
+    )
+
+    parser.add_argument(
+        "--vendor-id",
+        required=True,
     )
 
     parser.add_argument(
         "--document-id",
         default=None,
-        help=(
-            "Optional document UUID "
-            "to restrict retrieval."
-        ),
     )
 
     parser.add_argument(
@@ -160,12 +162,8 @@ async def main() -> int:
 
     args = parser.parse_args()
 
-    database_url = (
-        get_database_url()
-    )
-
     engine = create_async_engine(
-        database_url,
+        get_database_url(),
         poolclass=NullPool,
         pool_pre_ping=True,
     )
@@ -187,26 +185,38 @@ async def main() -> int:
     )
 
     try:
-        async with (
-            session_factory()
-            as db
-        ):
-            results = (
-                await retriever.search(
-                    db=db,
-                    query=args.query,
-                    limit=args.limit,
-                    document_id=(
-                        args.document_id
-                    ),
+        try:
+            async with (
+                session_factory() as db
+            ):
+                results = (
+                    await retriever.search(
+                        db=db,
+                        query=args.query,
+                        vendor_id=(
+                            args.vendor_id
+                        ),
+                        document_id=(
+                            args.document_id
+                        ),
+                        limit=args.limit,
+                    )
                 )
+
+        except (
+            VendorNotFoundError,
+            DocumentNotFoundError,
+            ValueError,
+        ) as exc:
+            print(
+                f"ERROR: {exc}"
             )
+            return 2
 
         print()
         print(
-            "Semantic retrieval test"
+            "Vendor semantic retrieval test"
         )
-
         print(
             "================================"
         )
@@ -215,10 +225,20 @@ async def main() -> int:
             f"Query: {args.query}"
         )
 
+        print(
+            f"Vendor: {args.vendor_id}"
+        )
+
         if args.document_id:
             print(
                 "Document: "
                 f"{args.document_id}"
+            )
+        else:
+            print(
+                "Document scope: "
+                "ALL READY DOCUMENTS "
+                "FOR VENDOR"
             )
 
         print(
@@ -280,15 +300,13 @@ async def main() -> int:
             print(
                 result.content
             )
-
             print()
 
         if not results:
             print(
-                "No matching chunks found."
+                "No matching chunks found "
+                "for this vendor."
             )
-
-            return 1
 
         return 0
 

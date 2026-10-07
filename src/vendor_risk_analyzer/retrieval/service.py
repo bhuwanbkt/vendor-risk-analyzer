@@ -12,6 +12,14 @@ from vendor_risk_analyzer.embeddings.service import (
 )
 
 
+class VendorNotFoundError(ValueError):
+    """Raised when the requested vendor does not exist."""
+
+
+class DocumentNotFoundError(ValueError):
+    """Raised when a document does not belong to the vendor."""
+
+
 @dataclass
 class RetrievalResult:
     chunk_id: str
@@ -21,6 +29,21 @@ class RetrievalResult:
     metadata: dict[str, Any]
     cosine_distance: float
     similarity: float
+
+
+def normalize_uuid(
+    value: UUID | str,
+    *,
+    field_name: str,
+) -> str:
+    try:
+        return str(
+            UUID(str(value))
+        )
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid {field_name}."
+        ) from exc
 
 
 def vector_to_pgvector_literal(
@@ -45,11 +68,78 @@ class SemanticRetriever:
             embedding_service
         )
 
+    async def _validate_vendor(
+        self,
+        *,
+        db: AsyncSession,
+        vendor_id: str,
+    ) -> None:
+        result = await db.execute(
+            text(
+                """
+                SELECT 1
+                FROM vendors
+                WHERE id = CAST(
+                    :vendor_id AS uuid
+                )
+                LIMIT 1
+                """
+            ),
+            {
+                "vendor_id": vendor_id,
+            },
+        )
+
+        if (
+            result.scalar_one_or_none()
+            is None
+        ):
+            raise VendorNotFoundError(
+                "Vendor not found."
+            )
+
+    async def _validate_document(
+        self,
+        *,
+        db: AsyncSession,
+        vendor_id: str,
+        document_id: str,
+    ) -> None:
+        result = await db.execute(
+            text(
+                """
+                SELECT 1
+                FROM documents
+                WHERE
+                    id = CAST(
+                        :document_id AS uuid
+                    )
+                    AND vendor_id = CAST(
+                        :vendor_id AS uuid
+                    )
+                LIMIT 1
+                """
+            ),
+            {
+                "vendor_id": vendor_id,
+                "document_id": document_id,
+            },
+        )
+
+        if (
+            result.scalar_one_or_none()
+            is None
+        ):
+            raise DocumentNotFoundError(
+                "Document not found for vendor."
+            )
+
     async def search(
         self,
         *,
         db: AsyncSession,
         query: str,
+        vendor_id: UUID | str,
         limit: int = 5,
         document_id: UUID | str | None = None,
     ) -> list[RetrievalResult]:
@@ -64,6 +154,40 @@ class SemanticRetriever:
         if limit < 1:
             raise ValueError(
                 "limit must be at least 1."
+            )
+
+        normalized_vendor_id = (
+            normalize_uuid(
+                vendor_id,
+                field_name="vendor_id",
+            )
+        )
+
+        normalized_document_id = None
+
+        if document_id is not None:
+            normalized_document_id = (
+                normalize_uuid(
+                    document_id,
+                    field_name="document_id",
+                )
+            )
+
+        await self._validate_vendor(
+            db=db,
+            vendor_id=normalized_vendor_id,
+        )
+
+        if (
+            normalized_document_id
+            is not None
+        ):
+            await self._validate_document(
+                db=db,
+                vendor_id=normalized_vendor_id,
+                document_id=(
+                    normalized_document_id
+                ),
             )
 
         query_embedding = (
@@ -124,7 +248,12 @@ class SemanticRetriever:
 
                 AND d.status = 'ready'
 
-                AND dc.metadata->>'embedding_model'
+                AND d.vendor_id = CAST(
+                    :vendor_id AS uuid
+                )
+
+                AND dc.metadata
+                    ->>'embedding_model'
                     = CAST(
                         :embedding_model
                         AS text
@@ -145,6 +274,9 @@ class SemanticRetriever:
             "query_embedding": (
                 embedding_literal
             ),
+            "vendor_id": (
+                normalized_vendor_id
+            ),
             "embedding_model": (
                 self.embedding_service.model
             ),
@@ -154,17 +286,18 @@ class SemanticRetriever:
             "limit": limit,
         }
 
-        if document_id is not None:
+        if (
+            normalized_document_id
+            is not None
+        ):
             sql += """
-                AND dc.document_id
-                    = CAST(
-                        :document_id
-                        AS uuid
-                    )
+                AND dc.document_id = CAST(
+                    :document_id AS uuid
+                )
             """
 
-            params["document_id"] = str(
-                document_id
+            params["document_id"] = (
+                normalized_document_id
             )
 
         sql += """
@@ -174,8 +307,7 @@ class SemanticRetriever:
                 query_vector.embedding
 
             LIMIT CAST(
-                :limit
-                AS integer
+                :limit AS integer
             )
         """
 
