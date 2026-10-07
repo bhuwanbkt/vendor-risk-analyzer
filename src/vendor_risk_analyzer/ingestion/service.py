@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import time
 
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,19 +21,69 @@ from vendor_risk_analyzer.storage.client import (
 )
 
 
+# Route ingestion logs through Uvicorn so they are
+# visible in Northflank container logs.
+logger = logging.getLogger(
+    "uvicorn.error"
+)
+
+
 async def ingest_document(
     *,
     document: Document,
     db: AsyncSession,
 ) -> Document:
+    ingestion_started = (
+        time.perf_counter()
+    )
+
+    logger.info(
+        "Document %s ingestion started. "
+        "File=%s type=%s",
+        document.id,
+        document.filename,
+        document.file_type,
+    )
 
     document.status = "processing"
 
     await db.commit()
 
+    logger.info(
+        "Document %s status changed "
+        "to processing.",
+        document.id,
+    )
+
     try:
+        # ----------------------------------------------------
+        # Select parser
+        # ----------------------------------------------------
+
         parser = get_parser(
             document.file_type
+        )
+
+        logger.info(
+            "Document %s parser selected. "
+            "Parser=%s version=%s",
+            document.id,
+            parser.__class__.__name__,
+            parser.parser_version,
+        )
+
+        # ----------------------------------------------------
+        # Download original document
+        # ----------------------------------------------------
+
+        download_started = (
+            time.perf_counter()
+        )
+
+        logger.info(
+            "Document %s download started "
+            "from object storage.",
+            document.id,
         )
 
         raw_content = await asyncio.to_thread(
@@ -39,8 +91,47 @@ async def ingest_document(
             document.object_key,
         )
 
+        download_duration = (
+            time.perf_counter()
+            - download_started
+        )
+
+        logger.info(
+            "Document %s download completed. "
+            "Bytes=%s duration=%.3fs",
+            document.id,
+            len(raw_content),
+            download_duration,
+        )
+
+        # ----------------------------------------------------
+        # Parse document
+        # ----------------------------------------------------
+
+        parsing_started = (
+            time.perf_counter()
+        )
+
+        logger.info(
+            "Document %s parsing started.",
+            document.id,
+        )
+
         parsed_elements = parser.parse(
             raw_content
+        )
+
+        parsing_duration = (
+            time.perf_counter()
+            - parsing_started
+        )
+
+        logger.info(
+            "Document %s parsing completed. "
+            "Elements=%s duration=%.3fs",
+            document.id,
+            len(parsed_elements),
+            parsing_duration,
         )
 
         if not parsed_elements:
@@ -48,7 +139,18 @@ async def ingest_document(
                 "Document contained no parseable content"
             )
 
+        # ----------------------------------------------------
+        # Remove previous ingestion results
+        #
         # Makes re-processing idempotent.
+        # ----------------------------------------------------
+
+        logger.info(
+            "Document %s clearing previous "
+            "chunks and elements.",
+            document.id,
+        )
+
         await db.execute(
             delete(DocumentChunk).where(
                 DocumentChunk.document_id
@@ -62,6 +164,16 @@ async def ingest_document(
                 == document.id
             )
         )
+
+        logger.info(
+            "Document %s previous ingestion "
+            "data cleared.",
+            document.id,
+        )
+
+        # ----------------------------------------------------
+        # Persist parsed elements
+        # ----------------------------------------------------
 
         stored_elements: list[
             DocumentElement
@@ -106,14 +218,52 @@ async def ingest_document(
         # Generate UUIDs before creating chunks.
         await db.flush()
 
+        logger.info(
+            "Document %s parsed elements "
+            "prepared for persistence. "
+            "Elements=%s",
+            document.id,
+            len(stored_elements),
+        )
+
+        # ----------------------------------------------------
+        # Create retrieval chunks
+        # ----------------------------------------------------
+
+        chunking_started = (
+            time.perf_counter()
+        )
+
+        logger.info(
+            "Document %s chunking started.",
+            document.id,
+        )
+
         parsed_chunks = create_chunks(
             parsed_elements
+        )
+
+        chunking_duration = (
+            time.perf_counter()
+            - chunking_started
+        )
+
+        logger.info(
+            "Document %s chunking completed. "
+            "Chunks=%s duration=%.3fs",
+            document.id,
+            len(parsed_chunks),
+            chunking_duration,
         )
 
         if not parsed_chunks:
             raise ValueError(
                 "Document produced no retrieval chunks"
             )
+
+        # ----------------------------------------------------
+        # Persist retrieval chunks
+        # ----------------------------------------------------
 
         for sequence, chunk in enumerate(
             parsed_chunks
@@ -154,10 +304,21 @@ async def ingest_document(
 
             db.add(db_chunk)
 
+        logger.info(
+            "Document %s retrieval chunks "
+            "prepared for persistence. "
+            "Chunks=%s",
+            document.id,
+            len(parsed_chunks),
+        )
+
+        # ----------------------------------------------------
         # Parsing and chunking succeeded.
         #
         # Embeddings are intentionally generated
         # separately by the embedding worker.
+        # ----------------------------------------------------
+
         document.status = (
             "embedding_pending"
         )
@@ -182,9 +343,38 @@ async def ingest_document(
             document
         )
 
+        total_duration = (
+            time.perf_counter()
+            - ingestion_started
+        )
+
+        logger.info(
+            "Document %s ingestion completed. "
+            "Elements=%s chunks=%s "
+            "status=embedding_pending "
+            "duration=%.3fs",
+            document.id,
+            len(parsed_elements),
+            len(parsed_chunks),
+            total_duration,
+        )
+
         return document
 
     except Exception as exc:
+        total_duration = (
+            time.perf_counter()
+            - ingestion_started
+        )
+
+        logger.exception(
+            "Document %s ingestion failed "
+            "after %.3fs. Error=%s",
+            document.id,
+            total_duration,
+            str(exc),
+        )
+
         await db.rollback()
 
         document.status = "failed"
@@ -195,5 +385,11 @@ async def ingest_document(
         }
 
         await db.commit()
+
+        logger.error(
+            "Document %s status changed "
+            "to failed.",
+            document.id,
+        )
 
         raise
