@@ -25,7 +25,10 @@ from vendor_risk_analyzer.embeddings.service import (
 )
 
 
-logger = logging.getLogger(__name__)
+# Use Uvicorn's logger so messages appear
+logger = logging.getLogger(
+    "uvicorn.error"
+)
 
 
 def _get_int_env(
@@ -239,6 +242,15 @@ async def process_document(
                     chunk["content"]
                 ).strip()
 
+                logger.info(
+                    "Generating embedding for "
+                    "document %s chunk %s "
+                    "sequence %s",
+                    document_id,
+                    chunk["id"],
+                    chunk["sequence"],
+                )
+
                 embedding = (
                     await embedding_service
                     .embed_document(
@@ -320,6 +332,13 @@ async def process_document(
                     ] > 0
                     and delay_seconds > 0
                 ):
+                    logger.info(
+                        "Waiting %.1f seconds "
+                        "before next embedding "
+                        "request.",
+                        delay_seconds,
+                    )
+
                     await asyncio.sleep(
                         delay_seconds
                     )
@@ -332,9 +351,18 @@ async def process_document(
         )
 
         try:
-            await finalize_document(
-                engine,
-                document_id=document_id,
+            final_status = (
+                await finalize_document(
+                    engine,
+                    document_id=document_id,
+                )
+            )
+
+            logger.info(
+                "Document %s restored to %s "
+                "during worker shutdown.",
+                document_id,
+                final_status,
             )
 
         except Exception:
@@ -359,6 +387,12 @@ async def process_document(
             document_id=document_id,
         )
 
+        logger.error(
+            "Document %s marked "
+            "embedding_failed.",
+            document_id,
+        )
+
         return "embedding_failed"
 
     except Exception:
@@ -371,6 +405,12 @@ async def process_document(
         await mark_document_failed(
             engine,
             document_id=document_id,
+        )
+
+        logger.error(
+            "Document %s marked "
+            "embedding_failed.",
+            document_id,
         )
 
         return "embedding_failed"
@@ -437,8 +477,8 @@ async def run_embedding_worker() -> None:
 
         logger.info(
             "Automatic embedding worker "
-            "started. poll=%ss "
-            "batch=%s delay=%ss",
+            "started. poll=%.1fs "
+            "batch=%s delay=%.1fs",
             poll_seconds,
             batch_size,
             delay_seconds,
@@ -459,16 +499,32 @@ async def run_embedding_worker() -> None:
 
                     continue
 
-                await process_document(
-                    engine,
-                    embedding_service,
-                    document_id=(
-                        document_id
-                    ),
-                    batch_size=batch_size,
-                    delay_seconds=(
-                        delay_seconds
-                    ),
+                logger.info(
+                    "Claimed document %s "
+                    "for automatic embedding.",
+                    document_id,
+                )
+
+                final_status = (
+                    await process_document(
+                        engine,
+                        embedding_service,
+                        document_id=(
+                            document_id
+                        ),
+                        batch_size=batch_size,
+                        delay_seconds=(
+                            delay_seconds
+                        ),
+                    )
+                )
+
+                logger.info(
+                    "Automatic embedding "
+                    "processing completed for "
+                    "document %s with status %s.",
+                    document_id,
+                    final_status,
                 )
 
             except asyncio.CancelledError:
