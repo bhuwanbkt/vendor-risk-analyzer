@@ -84,6 +84,19 @@ class RiskPolicyService:
         db: AsyncSession,
         assessment_id: UUID | str,
     ) -> RiskPolicyEvaluation:
+        """
+        Evaluate an existing assessment
+        against deterministic policy rules.
+
+        This method is READ ONLY.
+
+        It does not modify:
+        - finding severity
+        - finding rule_id
+        - assessment overall_risk
+        - assessment overall_score
+        """
+
         try:
             normalized_id = UUID(
                 str(
@@ -190,8 +203,12 @@ class RiskPolicyService:
                     proposed_severity=(
                         proposed_severity
                     ),
-                    rule_id=rule_id,
-                    rationale=rationale,
+                    rule_id=(
+                        rule_id
+                    ),
+                    rationale=(
+                        rationale
+                    ),
                 )
             )
 
@@ -231,7 +248,9 @@ class RiskPolicyService:
             "overall_risk=%s",
             normalized_id,
             POLICY_VERSION,
-            len(decisions),
+            len(
+                decisions
+            ),
             proposed_overall_risk,
         )
 
@@ -245,5 +264,182 @@ class RiskPolicyService:
             proposed_overall_risk=(
                 proposed_overall_risk
             ),
-            decisions=decisions,
+            decisions=(
+                decisions
+            ),
         )
+
+    async def apply_assessment(
+        self,
+        *,
+        db: AsyncSession,
+        assessment_id: UUID | str,
+    ) -> RiskPolicyEvaluation:
+        """
+        Evaluate the assessment and persist
+        deterministic policy decisions.
+
+        Updates:
+        - findings.severity
+        - findings.rule_id
+        - findings.metadata
+        - assessments.overall_risk
+        - assessments.metadata
+
+        Does NOT calculate or modify
+        overall_score.
+        """
+
+        evaluation = (
+            await self.evaluate_assessment(
+                db=db,
+                assessment_id=assessment_id,
+            )
+        )
+
+        assessment = await db.get(
+            Assessment,
+            evaluation.assessment_id,
+        )
+
+        if assessment is None:
+            raise RiskPolicyError(
+                "Assessment not found."
+            )
+
+        result = await db.execute(
+            select(
+                Finding
+            )
+            .where(
+                Finding.assessment_id
+                == evaluation.assessment_id
+            )
+        )
+
+        findings = {
+            finding.id:
+                finding
+            for finding
+            in result.scalars().all()
+        }
+
+        if (
+            len(findings)
+            != len(
+                evaluation.decisions
+            )
+        ):
+            raise RiskPolicyError(
+                "Finding count changed "
+                "between evaluation and "
+                "policy application."
+            )
+
+        try:
+            for decision in (
+                evaluation.decisions
+            ):
+                finding = findings.get(
+                    decision.finding_id
+                )
+
+                if finding is None:
+                    raise RiskPolicyError(
+                        "Finding disappeared "
+                        "during policy "
+                        "application."
+                    )
+
+                finding.severity = (
+                    decision
+                    .proposed_severity
+                )
+
+                finding.rule_id = (
+                    decision.rule_id
+                )
+
+                finding.extra_data = {
+                    **finding.extra_data,
+                    "severity_policy":
+                        (
+                            evaluation
+                            .policy_version
+                        ),
+                    "policy_rule_id":
+                        (
+                            decision.rule_id
+                        ),
+                    "policy_rationale":
+                        (
+                            decision.rationale
+                        ),
+                    "policy_applied":
+                        True,
+                }
+
+            assessment.overall_risk = (
+                evaluation
+                .proposed_overall_risk
+            )
+
+            rated_finding_count = sum(
+                1
+                for decision
+                in evaluation.decisions
+                if (
+                    decision
+                    .proposed_severity
+                    != "unrated"
+                )
+            )
+
+            assessment.extra_data = {
+                **assessment.extra_data,
+                "risk_policy_version":
+                    (
+                        evaluation
+                        .policy_version
+                    ),
+                "policy_applied":
+                    True,
+                "rated_finding_count":
+                    (
+                        rated_finding_count
+                    ),
+                "total_finding_count":
+                    len(
+                        evaluation.decisions
+                    ),
+            }
+
+            await db.commit()
+
+        except Exception:
+            await db.rollback()
+
+            logger.exception(
+                "Risk policy application "
+                "failed. "
+                "assessment_id=%s",
+                evaluation.assessment_id,
+            )
+
+            raise
+
+        logger.info(
+            "Risk policy applied. "
+            "assessment_id=%s "
+            "policy=%s "
+            "overall_risk=%s "
+            "findings=%s",
+            evaluation.assessment_id,
+            evaluation.policy_version,
+            evaluation.proposed_overall_risk,
+            len(
+                evaluation.decisions
+            ),
+        )
+
+        return evaluation
