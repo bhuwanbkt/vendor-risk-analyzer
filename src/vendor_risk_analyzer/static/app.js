@@ -1,5 +1,6 @@
 // ============================================================
 // Vendor Risk Analyzer - Frontend
+// Separate vendor workspaces: upload, document library, assessment
 // ============================================================
 
 
@@ -7,56 +8,324 @@
 // DOM ELEMENTS
 // ------------------------------------------------------------
 
-// Vendor elements
-const vendorForm = document.getElementById("vendor-form");
-const vendorList = document.getElementById("vendor-list");
-const vendorMessage = document.getElementById("vendor-message");
+// Vendor management
+const vendorForm =
+    document.getElementById(
+        "vendor-form"
+    );
+
+const vendorList =
+    document.getElementById(
+        "vendor-list"
+    );
+
+const vendorMessage =
+    document.getElementById(
+        "vendor-message"
+    );
 
 const vendorNameInput =
-    document.getElementById("vendor-name");
+    document.getElementById(
+        "vendor-name"
+    );
 
 const vendorWebsiteInput =
-    document.getElementById("vendor-website");
+    document.getElementById(
+        "vendor-website"
+    );
+
+const vendorCount =
+    document.getElementById(
+        "vendor-count"
+    );
 
 
-// Document elements
+// Upload workspace
 const documentForm =
-    document.getElementById("document-upload-form");
+    document.getElementById(
+        "document-upload-form"
+    );
 
-const documentVendor =
-    document.getElementById("document-vendor");
+const uploadVendor =
+    document.getElementById(
+        "upload-vendor"
+    );
 
 const documentFile =
-    document.getElementById("document-file");
+    document.getElementById(
+        "document-file"
+    );
 
 const documentMessage =
-    document.getElementById("document-upload-message");
+    document.getElementById(
+        "document-upload-message"
+    );
+
+
+// Document library workspace
+const documentLibraryVendor =
+    document.getElementById(
+        "document-library-vendor"
+    );
 
 const documentList =
-    document.getElementById("document-list");
+    document.getElementById(
+        "document-list"
+    );
+
+const documentCount =
+    document.getElementById(
+        "document-count"
+    );
 
 
-// Assessment elements
+// Assessment workspace
+const assessmentVendor =
+    document.getElementById(
+        "assessment-vendor"
+    );
+
+const assessmentReadyStatus =
+    document.getElementById(
+        "assessment-ready-status"
+    );
+
 const runAssessmentButton =
-    document.getElementById("run-assessment-button");
+    document.getElementById(
+        "run-assessment-button"
+    );
 
 const assessmentMessage =
-    document.getElementById("assessment-message");
+    document.getElementById(
+        "assessment-message"
+    );
 
 const assessmentResult =
-    document.getElementById("assessment-result");
+    document.getElementById(
+        "assessment-result"
+    );
 
 
 // ------------------------------------------------------------
-// SECURITY / DISPLAY HELPERS
+// GENERIC HELPERS
 // ------------------------------------------------------------
 
 function escapeHtml(value) {
-    const div = window.document.createElement("div");
+    const div =
+        window.document.createElement(
+            "div"
+        );
 
-    div.textContent = value ?? "";
+    div.textContent =
+        value ?? "";
 
     return div.innerHTML;
+}
+
+
+function setMessage(
+    element,
+    message
+) {
+    if (!element) {
+        return;
+    }
+
+    element.textContent =
+        message || "";
+}
+
+
+function formatFileSize(
+    bytes
+) {
+    if (
+        bytes === null ||
+        bytes === undefined
+    ) {
+        return "";
+    }
+
+    if (
+        bytes < 1024
+    ) {
+        return `${bytes} B`;
+    }
+
+    if (
+        bytes
+        < 1024 * 1024
+    ) {
+        return `${
+            (
+                bytes /
+                1024
+            ).toFixed(1)
+        } KB`;
+    }
+
+    return `${
+        (
+            bytes /
+            (
+                1024
+                * 1024
+            )
+        ).toFixed(1)
+    } MB`;
+}
+
+
+function formatLabel(
+    value
+) {
+    if (!value) {
+        return "Other";
+    }
+
+    return String(value)
+        .replaceAll(
+            "_",
+            " "
+        )
+        .replace(
+            /\b\w/g,
+            (letter) =>
+                letter.toUpperCase()
+        );
+}
+
+
+function severityClass(
+    value
+) {
+    const severity =
+        String(
+            value ||
+            "unrated"
+        ).toLowerCase();
+
+    const allowed = [
+        "low",
+        "medium",
+        "high",
+        "critical",
+        "unrated",
+    ];
+
+    return allowed.includes(
+        severity
+    )
+        ? severity
+        : "unrated";
+}
+
+
+function populateVendorSelect(
+    selectElement,
+    vendors
+) {
+    if (!selectElement) {
+        return;
+    }
+
+    const currentSelection =
+        selectElement.value;
+
+    selectElement.innerHTML =
+        '<option value="">Select vendor</option>';
+
+    for (
+        const vendor
+        of vendors
+    ) {
+        const option =
+            window.document
+                .createElement(
+                    "option"
+                );
+
+        option.value =
+            vendor.id;
+
+        option.textContent =
+            vendor.name;
+
+        selectElement
+            .appendChild(
+                option
+            );
+    }
+
+    if (
+        currentSelection &&
+        vendors.some(
+            (vendor) =>
+                vendor.id
+                === currentSelection
+        )
+    ) {
+        selectElement.value =
+            currentSelection;
+    }
+}
+
+
+function clearAssessmentOutput() {
+    setMessage(
+        assessmentMessage,
+        ""
+    );
+
+    if (
+        assessmentResult
+    ) {
+        assessmentResult
+            .innerHTML =
+            "";
+    }
+}
+
+
+async function readJsonSafely(
+    response
+) {
+    try {
+        return await response
+            .json();
+
+    } catch {
+        return {};
+    }
+}
+
+
+function responseError(
+    body,
+    response,
+    fallback
+) {
+    const detail =
+        body?.detail;
+
+    if (
+        typeof detail
+            === "string"
+        &&
+        detail.trim()
+    ) {
+        return `${
+            detail
+        } (HTTP ${
+            response.status
+        })`;
+    }
+
+    return `${
+        fallback
+    } (HTTP ${
+        response.status
+    })`;
 }
 
 
@@ -65,105 +334,150 @@ function escapeHtml(value) {
 // ------------------------------------------------------------
 
 async function loadVendors() {
-    // The user may not be logged in,
-    // so these elements may not exist.
     if (!vendorList) {
-        return;
+        return [];
     }
 
     try {
-        const response = await fetch(
-            "/api/vendors",
-            {
-                credentials: "same-origin",
-            }
-        );
+        const response =
+            await fetch(
+                "/api/vendors",
+                {
+                    credentials:
+                        "same-origin",
+                }
+            );
 
-        if (!response.ok) {
+        const body =
+            await readJsonSafely(
+                response
+            );
+
+        if (
+            !response.ok
+        ) {
             throw new Error(
-                "Unable to load vendors"
+                responseError(
+                    body,
+                    response,
+                    "Unable to load vendors"
+                )
             );
         }
 
-        const vendors = await response.json();
+        const vendors =
+            Array.isArray(
+                body
+            )
+                ? body
+                : [];
+
+
+        // ----------------------------------------------------
+        // Dashboard vendor count
+        // ----------------------------------------------------
+
+        if (
+            vendorCount
+        ) {
+            vendorCount
+                .textContent =
+                String(
+                    vendors.length
+                );
+        }
 
 
         // ----------------------------------------------------
         // Render vendor list
         // ----------------------------------------------------
 
-        vendorList.innerHTML = "";
+        vendorList.innerHTML =
+            "";
 
-        if (vendors.length === 0) {
+        if (
+            vendors.length === 0
+        ) {
             vendorList.innerHTML =
-                "<p>No vendors have been added yet.</p>";
-        } else {
-            for (const vendor of vendors) {
-                const item =
-                    window.document.createElement("div");
+                `
+                <div class="empty-state">
+                    No vendors have been added yet.
+                </div>
+                `;
 
-                item.className = "vendor-item";
+        } else {
+            for (
+                const vendor
+                of vendors
+            ) {
+                const item =
+                    window.document
+                        .createElement(
+                            "div"
+                        );
+
+                item.className =
+                    "vendor-item";
 
                 item.innerHTML = `
                     <div>
                         <strong>
-                            ${escapeHtml(vendor.name)}
+                            ${escapeHtml(
+                                vendor.name
+                            )}
                         </strong>
 
                         <div class="vendor-website">
                             ${
                                 vendor.website
-                                    ? escapeHtml(vendor.website)
+                                    ? escapeHtml(
+                                        vendor.website
+                                    )
                                     : "No website"
                             }
                         </div>
                     </div>
 
                     <span class="vendor-status">
-                        ${escapeHtml(vendor.status)}
+                        ${escapeHtml(
+                            vendor.status
+                        )}
                     </span>
                 `;
 
-                vendorList.appendChild(item);
-            }
-        }
-
-
-        // ----------------------------------------------------
-        // Populate document vendor dropdown
-        // ----------------------------------------------------
-
-        if (documentVendor) {
-            const currentSelection =
-                documentVendor.value;
-
-            documentVendor.innerHTML =
-                '<option value="">Select vendor</option>';
-
-            for (const vendor of vendors) {
-                const option =
-                    window.document.createElement(
-                        "option"
+                vendorList
+                    .appendChild(
+                        item
                     );
-
-                option.value = vendor.id;
-                option.textContent = vendor.name;
-
-                documentVendor.appendChild(option);
-            }
-
-            // Preserve selection if vendor still exists
-            if (
-                currentSelection &&
-                vendors.some(
-                    (vendor) =>
-                        vendor.id === currentSelection
-                )
-            ) {
-                documentVendor.value =
-                    currentSelection;
             }
         }
+
+
+        // ----------------------------------------------------
+        // IMPORTANT
+        //
+        // Each workflow gets a completely separate
+        // vendor selector.
+        //
+        // Changing one does NOT change the other two.
+        // ----------------------------------------------------
+
+        populateVendorSelect(
+            uploadVendor,
+            vendors
+        );
+
+        populateVendorSelect(
+            documentLibraryVendor,
+            vendors
+        );
+
+        populateVendorSelect(
+            assessmentVendor,
+            vendors
+        );
+
+        return vendors;
 
     } catch (error) {
         console.error(
@@ -172,7 +486,13 @@ async function loadVendors() {
         );
 
         vendorList.innerHTML =
-            "<p>Unable to load vendors.</p>";
+            `
+            <div class="empty-state">
+                Unable to load vendors.
+            </div>
+            `;
+
+        return [];
     }
 }
 
@@ -181,237 +501,54 @@ async function loadVendors() {
 // CREATE VENDOR
 // ------------------------------------------------------------
 
-if (vendorForm) {
+if (
+    vendorForm
+) {
     vendorForm.addEventListener(
         "submit",
         async (event) => {
             event.preventDefault();
 
-            vendorMessage.textContent = "";
+            setMessage(
+                vendorMessage,
+                ""
+            );
 
             const name =
-                vendorNameInput.value.trim();
+                vendorNameInput
+                    ?.value
+                    .trim()
+                || "";
 
             const website =
-                vendorWebsiteInput.value.trim();
+                vendorWebsiteInput
+                    ?.value
+                    .trim()
+                || "";
 
             const csrfToken =
-                vendorForm.dataset.csrfToken;
+                vendorForm
+                    .dataset
+                    .csrfToken;
+
 
             if (!name) {
-                vendorMessage.textContent =
-                    "Vendor name is required.";
-
-                return;
-            }
-
-            try {
-                const response = await fetch(
-                    "/api/vendors",
-                    {
-                        method: "POST",
-
-                        credentials: "same-origin",
-
-                        headers: {
-                            "Content-Type":
-                                "application/json",
-
-                            "X-CSRF-Token":
-                                csrfToken,
-                        },
-
-                        body: JSON.stringify({
-                            name: name,
-
-                            website:
-                                website || null,
-                        }),
-                    }
+                setMessage(
+                    vendorMessage,
+                    "Vendor name is required."
                 );
-
-                const body =
-                    await response.json();
-
-                if (!response.ok) {
-                    throw new Error(
-                        body.detail ||
-                        "Unable to create vendor"
-                    );
-                }
-
-                vendorMessage.textContent =
-                    "Vendor created successfully.";
-
-                vendorForm.reset();
-
-                await loadVendors();
-
-            } catch (error) {
-                console.error(
-                    "Vendor creation failed:",
-                    error
-                );
-
-                vendorMessage.textContent =
-                    error.message;
-            }
-        }
-    );
-}
-
-
-// ------------------------------------------------------------
-// FILE HASHING
-// ------------------------------------------------------------
-
-async function sha256File(file) {
-    const buffer =
-        await file.arrayBuffer();
-
-    const digest =
-        await window.crypto.subtle.digest(
-            "SHA-256",
-            buffer
-        );
-
-    const bytes =
-        new Uint8Array(digest);
-
-    return Array.from(bytes)
-        .map(
-            (byte) =>
-                byte
-                    .toString(16)
-                    .padStart(2, "0")
-        )
-        .join("");
-}
-
-
-// ------------------------------------------------------------
-// CONTENT TYPE DETECTION
-// ------------------------------------------------------------
-
-function getContentType(file) {
-    // Browser already knows the MIME type
-    // in many cases.
-    if (file.type) {
-        return file.type;
-    }
-
-    const extension =
-        file.name
-            .split(".")
-            .pop()
-            .toLowerCase();
-
-    const types = {
-        pdf: "application/pdf",
-
-        docx:
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-
-        xlsx:
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-
-        csv: "text/csv",
-
-        txt: "text/plain",
-
-        md: "text/markdown",
-    };
-
-    return (
-        types[extension] ||
-        "application/octet-stream"
-    );
-}
-
-
-// ------------------------------------------------------------
-// DOCUMENT UPLOAD
-// ------------------------------------------------------------
-
-if (documentForm) {
-    documentForm.addEventListener(
-        "submit",
-        async (event) => {
-            event.preventDefault();
-
-            documentMessage.textContent =
-                "";
-
-            const vendorId =
-                documentVendor.value;
-
-            const file =
-                documentFile.files[0];
-
-            const csrfToken =
-                documentForm.dataset.csrfToken;
-
-
-            // ------------------------------------------------
-            // Basic browser validation
-            // ------------------------------------------------
-
-            if (!vendorId) {
-                documentMessage.textContent =
-                    "Please select a vendor.";
-
-                return;
-            }
-
-            if (!file) {
-                documentMessage.textContent =
-                    "Please select a document.";
-
-                return;
-            }
-
-
-            // Same 25 MB limit as FastAPI
-            const maxFileSize =
-                25 * 1024 * 1024;
-
-            if (file.size > maxFileSize) {
-                documentMessage.textContent =
-                    "File must be 25 MB or smaller.";
 
                 return;
             }
 
 
             try {
-                // --------------------------------------------
-                // STEP 1
-                // Calculate SHA-256 in the browser
-                // --------------------------------------------
-
-                documentMessage.textContent =
-                    "Preparing document...";
-
-                const sha256 =
-                    await sha256File(file);
-
-                const contentType =
-                    getContentType(file);
-
-
-                // --------------------------------------------
-                // STEP 2
-                // Ask FastAPI for a presigned upload URL
-                // --------------------------------------------
-
-                documentMessage.textContent =
-                    "Requesting secure upload...";
-
-                const prepareResponse =
+                const response =
                     await fetch(
-                        `/api/vendors/${vendorId}/documents/upload-url`,
+                        "/api/vendors",
                         {
-                            method: "POST",
+                            method:
+                                "POST",
 
                             credentials:
                                 "same-origin",
@@ -424,126 +561,60 @@ if (documentForm) {
                                     csrfToken,
                             },
 
-                            body: JSON.stringify({
-                                filename:
-                                    file.name,
+                            body:
+                                JSON.stringify(
+                                    {
+                                        name:
+                                            name,
 
-                                content_type:
-                                    contentType,
-
-                                size_bytes:
-                                    file.size,
-
-                                sha256:
-                                    sha256,
-                            }),
+                                        website:
+                                            website
+                                            || null,
+                                    }
+                                ),
                         }
                     );
 
 
-                const prepareBody =
-                    await prepareResponse.json();
+                const body =
+                    await readJsonSafely(
+                        response
+                    );
 
 
-                if (!prepareResponse.ok) {
+                if (
+                    !response.ok
+                ) {
                     throw new Error(
-                        prepareBody.detail ||
-                        "Unable to prepare upload"
+                        responseError(
+                            body,
+                            response,
+                            "Unable to create vendor"
+                        )
                     );
                 }
 
 
-                // --------------------------------------------
-                // STEP 3
-                // Upload directly to Neon Object Storage
-                //
-                // The file does NOT pass through FastAPI.
-                // --------------------------------------------
-
-                documentMessage.textContent =
-                    "Uploading document...";
-
-                const uploadResponse =
-                    await fetch(
-                        prepareBody.upload_url,
-                        {
-                            method: "PUT",
-
-                            headers: {
-                                "Content-Type":
-                                    contentType,
-                            },
-
-                            body: file,
-                        }
-                    );
-
-
-                if (!uploadResponse.ok) {
-                    throw new Error(
-                        "Object storage upload failed"
-                    );
-                }
-
-
-                // --------------------------------------------
-                // STEP 4
-                // Tell FastAPI that upload finished
-                // --------------------------------------------
-
-                documentMessage.textContent =
-                    "Verifying upload...";
-
-                const completeResponse =
-                    await fetch(
-                        `/api/vendors/${vendorId}/documents/${prepareBody.document_id}/complete`,
-                        {
-                            method: "POST",
-
-                            credentials:
-                                "same-origin",
-
-                            headers: {
-                                "X-CSRF-Token":
-                                    csrfToken,
-                            },
-                        }
-                    );
-
-
-                const completeBody =
-                    await completeResponse.json();
-
-
-                if (!completeResponse.ok) {
-                    throw new Error(
-                        completeBody.detail ||
-                        "Unable to complete upload"
-                    );
-                }
-
-
-                // --------------------------------------------
-                // SUCCESS
-                // --------------------------------------------
-
-                documentMessage.textContent =
-                    "Document uploaded successfully.";
-
-                documentFile.value = "";
-
-                await loadDocuments(
-                    vendorId
+                setMessage(
+                    vendorMessage,
+                    "Vendor created successfully."
                 );
+
+                vendorForm
+                    .reset();
+
+                await loadVendors();
 
             } catch (error) {
                 console.error(
-                    "Document upload failed:",
+                    "Vendor creation failed:",
                     error
                 );
 
-                documentMessage.textContent =
-                    error.message;
+                setMessage(
+                    vendorMessage,
+                    error.message
+                );
             }
         }
     );
@@ -551,126 +622,648 @@ if (documentForm) {
 
 
 // ------------------------------------------------------------
-// LOAD DOCUMENTS
+// FILE HELPERS
 // ------------------------------------------------------------
 
-async function loadDocuments(vendorId) {
-    if (!documentList) {
-        return;
-    }
+async function sha256File(
+    file
+) {
+    const buffer =
+        await file
+            .arrayBuffer();
 
-    if (!vendorId) {
-        documentList.textContent =
-            "Select a vendor to view documents.";
+    const digest =
+        await window.crypto
+            .subtle
+            .digest(
+                "SHA-256",
+                buffer
+            );
 
-        return;
-    }
-
-    documentList.textContent =
-        "Loading documents...";
-
-    try {
-        const response = await fetch(
-            `/api/vendors/${vendorId}/documents`,
-            {
-                credentials: "same-origin",
-            }
+    const bytes =
+        new Uint8Array(
+            digest
         );
 
-        if (!response.ok) {
+    return Array
+        .from(
+            bytes
+        )
+        .map(
+            (byte) =>
+                byte
+                    .toString(16)
+                    .padStart(
+                        2,
+                        "0"
+                    )
+        )
+        .join("");
+}
+
+
+function getContentType(
+    file
+) {
+    if (
+        file.type
+    ) {
+        return file.type;
+    }
+
+    const extension =
+        file.name
+            .split(".")
+            .pop()
+            .toLowerCase();
+
+    const types = {
+        pdf:
+            "application/pdf",
+
+        docx:
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+
+        xlsx:
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+
+        csv:
+            "text/csv",
+
+        txt:
+            "text/plain",
+
+        md:
+            "text/markdown",
+    };
+
+    return (
+        types[
+            extension
+        ]
+        ||
+        "application/octet-stream"
+    );
+}
+
+
+// ------------------------------------------------------------
+// UPLOAD WORKSPACE
+// ------------------------------------------------------------
+
+if (
+    documentForm
+) {
+    documentForm
+        .addEventListener(
+            "submit",
+            async (event) => {
+                event
+                    .preventDefault();
+
+                setMessage(
+                    documentMessage,
+                    ""
+                );
+
+
+                const vendorId =
+                    uploadVendor
+                        ?.value
+                    || "";
+
+                const file =
+                    documentFile
+                        ?.files
+                        ?.[0];
+
+                const csrfToken =
+                    documentForm
+                        .dataset
+                        .csrfToken;
+
+
+                if (!vendorId) {
+                    setMessage(
+                        documentMessage,
+                        "Please select an upload vendor."
+                    );
+
+                    return;
+                }
+
+
+                if (!file) {
+                    setMessage(
+                        documentMessage,
+                        "Please select a document."
+                    );
+
+                    return;
+                }
+
+
+                const maxFileSize =
+                    25
+                    * 1024
+                    * 1024;
+
+
+                if (
+                    file.size
+                    > maxFileSize
+                ) {
+                    setMessage(
+                        documentMessage,
+                        "File must be 25 MB or smaller."
+                    );
+
+                    return;
+                }
+
+
+                try {
+                    // ----------------------------------------
+                    // Step 1 - Hash file
+                    // ----------------------------------------
+
+                    setMessage(
+                        documentMessage,
+                        "Preparing document..."
+                    );
+
+                    const sha256 =
+                        await sha256File(
+                            file
+                        );
+
+                    const contentType =
+                        getContentType(
+                            file
+                        );
+
+
+                    // ----------------------------------------
+                    // Step 2 - Request presigned upload URL
+                    // ----------------------------------------
+
+                    setMessage(
+                        documentMessage,
+                        "Requesting secure upload..."
+                    );
+
+                    const prepareResponse =
+                        await fetch(
+                            `/api/vendors/${vendorId}/documents/upload-url`,
+                            {
+                                method:
+                                    "POST",
+
+                                credentials:
+                                    "same-origin",
+
+                                headers: {
+                                    "Content-Type":
+                                        "application/json",
+
+                                    "X-CSRF-Token":
+                                        csrfToken,
+                                },
+
+                                body:
+                                    JSON.stringify(
+                                        {
+                                            filename:
+                                                file.name,
+
+                                            content_type:
+                                                contentType,
+
+                                            size_bytes:
+                                                file.size,
+
+                                            sha256:
+                                                sha256,
+                                        }
+                                    ),
+                            }
+                        );
+
+
+                    const prepareBody =
+                        await readJsonSafely(
+                            prepareResponse
+                        );
+
+
+                    if (
+                        !prepareResponse.ok
+                    ) {
+                        throw new Error(
+                            responseError(
+                                prepareBody,
+                                prepareResponse,
+                                "Unable to prepare upload"
+                            )
+                        );
+                    }
+
+
+                    // ----------------------------------------
+                    // Step 3 - Upload directly to storage
+                    // ----------------------------------------
+
+                    setMessage(
+                        documentMessage,
+                        "Uploading document..."
+                    );
+
+                    const uploadResponse =
+                        await fetch(
+                            prepareBody
+                                .upload_url,
+                            {
+                                method:
+                                    "PUT",
+
+                                headers: {
+                                    "Content-Type":
+                                        contentType,
+                                },
+
+                                body:
+                                    file,
+                            }
+                        );
+
+
+                    if (
+                        !uploadResponse.ok
+                    ) {
+                        throw new Error(
+                            `Object storage upload failed (HTTP ${uploadResponse.status})`
+                        );
+                    }
+
+
+                    // ----------------------------------------
+                    // Step 4 - Complete upload
+                    // ----------------------------------------
+
+                    setMessage(
+                        documentMessage,
+                        "Verifying upload..."
+                    );
+
+                    const completeResponse =
+                        await fetch(
+                            `/api/vendors/${vendorId}/documents/${prepareBody.document_id}/complete`,
+                            {
+                                method:
+                                    "POST",
+
+                                credentials:
+                                    "same-origin",
+
+                                headers: {
+                                    "X-CSRF-Token":
+                                        csrfToken,
+                                },
+                            }
+                        );
+
+
+                    const completeBody =
+                        await readJsonSafely(
+                            completeResponse
+                        );
+
+
+                    if (
+                        !completeResponse.ok
+                    ) {
+                        throw new Error(
+                            responseError(
+                                completeBody,
+                                completeResponse,
+                                "Unable to complete upload"
+                            )
+                        );
+                    }
+
+
+                    setMessage(
+                        documentMessage,
+                        "Document uploaded successfully. Use Document Library to parse it."
+                    );
+
+
+                    documentFile.value =
+                        "";
+
+
+                    // ----------------------------------------
+                    // Do NOT change other workspace selections.
+                    //
+                    // Only refresh another workspace when it
+                    // already happens to be viewing this vendor.
+                    // ----------------------------------------
+
+                    if (
+                        documentLibraryVendor
+                            ?.value
+                        === vendorId
+                    ) {
+                        await loadDocuments(
+                            vendorId
+                        );
+                    }
+
+
+                    if (
+                        assessmentVendor
+                            ?.value
+                        === vendorId
+                    ) {
+                        await loadAssessmentReadiness(
+                            vendorId
+                        );
+                    }
+
+                } catch (error) {
+                    console.error(
+                        "Document upload failed:",
+                        error
+                    );
+
+                    setMessage(
+                        documentMessage,
+                        error.message
+                    );
+                }
+            }
+        );
+}
+
+
+// ------------------------------------------------------------
+// DOCUMENT LIBRARY WORKSPACE
+// ------------------------------------------------------------
+
+async function loadDocuments(
+    vendorId
+) {
+    if (
+        !documentList
+    ) {
+        return [];
+    }
+
+
+    if (!vendorId) {
+        documentList
+            .classList
+            .add(
+                "empty-state"
+            );
+
+        documentList
+            .textContent =
+            "Select a vendor to view documents.";
+
+        if (
+            documentCount
+        ) {
+            documentCount
+                .textContent =
+                "0";
+        }
+
+        return [];
+    }
+
+
+    documentList
+        .classList
+        .add(
+            "empty-state"
+        );
+
+    documentList
+        .textContent =
+        "Loading documents...";
+
+
+    try {
+        const response =
+            await fetch(
+                `/api/vendors/${vendorId}/documents`,
+                {
+                    credentials:
+                        "same-origin",
+                }
+            );
+
+
+        const body =
+            await readJsonSafely(
+                response
+            );
+
+
+        if (
+            !response.ok
+        ) {
             throw new Error(
-                "Unable to load documents"
+                responseError(
+                    body,
+                    response,
+                    "Unable to load documents"
+                )
             );
         }
 
+
         const documents =
-            await response.json();
+            Array.isArray(
+                body
+            )
+                ? body
+                : [];
 
-        documentList.innerHTML = "";
 
-
-        if (documents.length === 0) {
-            documentList.textContent =
-                "No documents uploaded.";
-
-            return;
+        if (
+            documentCount
+        ) {
+            documentCount
+                .textContent =
+                String(
+                    documents.length
+                );
         }
 
 
-        for (const doc of documents) {
-            const item =
-                window.document.createElement("div");
+        documentList.innerHTML =
+            "";
 
-            item.className = "document-item";
+
+        if (
+            documents.length
+            === 0
+        ) {
+            documentList
+                .classList
+                .add(
+                    "empty-state"
+                );
+
+            documentList
+                .textContent =
+                "No documents uploaded for this vendor.";
+
+            return documents;
+        }
+
+
+        documentList
+            .classList
+            .remove(
+                "empty-state"
+            );
+
+
+        for (
+            const doc
+            of documents
+        ) {
+            const item =
+                window.document
+                    .createElement(
+                        "div"
+                    );
+
+            item.className =
+                "document-item";
+
 
             const fileSize =
-                formatFileSize(doc.size_bytes);
+                formatFileSize(
+                    doc.size_bytes
+                );
 
-            let actionButton = "";
+
+            let actionButton =
+                "";
+
 
             const canParse =
-                doc.status === "uploaded" ||
-                doc.status === "failed" ||
-                doc.status === "parsed" ||
-                doc.status === "embedding_pending" ||
-                doc.status === "embedding_failed" ||
-                doc.status === "ready";
+                [
+                    "uploaded",
+                    "failed",
+                    "parsed",
+                    "embedding_pending",
+                    "embedding_failed",
+                    "ready",
+                ].includes(
+                    doc.status
+                );
 
+
+            // documentForm only exists for
+            // analyst/admin users.
             if (
-                documentForm &&
+                documentForm
+                &&
                 canParse
             ) {
                 const isReparse =
-                    doc.status !== "uploaded" &&
-                    doc.status !== "failed";
+                    ![
+                        "uploaded",
+                        "failed",
+                    ].includes(
+                        doc.status
+                    );
+
 
                 const buttonText =
                     isReparse
                         ? "Re-parse"
                         : "Parse";
 
+
                 actionButton = `
                     <button
                         type="button"
                         class="ingest-button"
-                        data-document-id="${escapeHtml(doc.id)}"
-                        data-vendor-id="${escapeHtml(doc.vendor_id)}"
+                        data-document-id="${escapeHtml(
+                            doc.id
+                        )}"
+                        data-vendor-id="${escapeHtml(
+                            doc.vendor_id
+                        )}"
                     >
                         ${buttonText}
                     </button>
                 `;
             }
 
+
             item.innerHTML = `
-                <div>
+                <div class="document-main">
+
                     <strong>
-                        ${escapeHtml(doc.filename)}
+                        ${escapeHtml(
+                            doc.filename
+                        )}
                     </strong>
 
                     <div class="document-details">
+
                         ${escapeHtml(
-                            doc.file_type.toUpperCase()
+                            String(
+                                doc.file_type
+                                || "file"
+                            ).toUpperCase()
                         )}
 
                         ${
                             fileSize
-                                ? ` • ${escapeHtml(fileSize)}`
+                                ? ` • ${escapeHtml(
+                                    fileSize
+                                )}`
                                 : ""
                         }
+
                     </div>
                 </div>
 
+
                 <div class="document-actions">
-                    <span class="document-status">
-                        ${escapeHtml(doc.status)}
+
+                    <span
+                        class="document-status status-${escapeHtml(
+                            doc.status
+                        )}"
+                    >
+                        ${escapeHtml(
+                            doc.status
+                        )}
                     </span>
 
                     ${actionButton}
+
                 </div>
             `;
 
-            documentList.appendChild(item);
+
+            documentList
+                .appendChild(
+                    item
+                );
         }
+
+
+        return documents;
 
     } catch (error) {
         console.error(
@@ -678,14 +1271,55 @@ async function loadDocuments(vendorId) {
             error
         );
 
-        documentList.textContent =
-            "Unable to load documents.";
+
+        documentList
+            .classList
+            .add(
+                "empty-state"
+            );
+
+
+        documentList
+            .textContent =
+            error.message;
+
+
+        if (
+            documentCount
+        ) {
+            documentCount
+                .textContent =
+                "0";
+        }
+
+
+        return [];
     }
 }
 
 
 // ------------------------------------------------------------
-// INGEST DOCUMENT
+// DOCUMENT LIBRARY VENDOR CHANGE
+// ------------------------------------------------------------
+
+if (
+    documentLibraryVendor
+) {
+    documentLibraryVendor
+        .addEventListener(
+            "change",
+            async () => {
+                await loadDocuments(
+                    documentLibraryVendor
+                        .value
+                );
+            }
+        );
+}
+
+
+// ------------------------------------------------------------
+// PARSE / RE-PARSE DOCUMENT
 // ------------------------------------------------------------
 
 async function ingestDocument(
@@ -693,53 +1327,84 @@ async function ingestDocument(
     documentId,
     button
 ) {
-    if (!documentForm) {
+    if (
+        !documentForm
+    ) {
         return;
     }
 
+
     const csrfToken =
-        documentForm.dataset.csrfToken;
+        documentForm
+            .dataset
+            .csrfToken;
+
 
     const originalText =
-        button.textContent;
+        button
+            .textContent;
 
-    button.disabled = true;
-    button.textContent = "Parsing...";
 
-    documentMessage.textContent =
-        "Parsing document...";
+    button.disabled =
+        true;
+
+
+    button.textContent =
+        "Parsing...";
+
 
     try {
-        const response = await fetch(
-            `/api/vendors/${vendorId}/documents/${documentId}/ingest`,
-            {
-                method: "POST",
+        const response =
+            await fetch(
+                `/api/vendors/${vendorId}/documents/${documentId}/ingest`,
+                {
+                    method:
+                        "POST",
 
-                credentials: "same-origin",
+                    credentials:
+                        "same-origin",
 
-                headers: {
-                    "X-CSRF-Token":
-                        csrfToken,
-                },
-            }
-        );
+                    headers: {
+                        "X-CSRF-Token":
+                            csrfToken,
+                    },
+                }
+            );
+
 
         const body =
-            await response.json();
+            await readJsonSafely(
+                response
+            );
 
-        if (!response.ok) {
+
+        if (
+            !response.ok
+        ) {
             throw new Error(
-                body.detail ||
-                "Document ingestion failed"
+                responseError(
+                    body,
+                    response,
+                    "Document ingestion failed"
+                )
             );
         }
 
-        documentMessage.textContent =
-            "Document parsed successfully. Embedding pending.";
 
         await loadDocuments(
             vendorId
         );
+
+
+        if (
+            assessmentVendor
+                ?.value
+            === vendorId
+        ) {
+            await loadAssessmentReadiness(
+                vendorId
+            );
+        }
 
     } catch (error) {
         console.error(
@@ -747,376 +1412,901 @@ async function ingestDocument(
             error
         );
 
-        documentMessage.textContent =
-            error.message;
 
-        button.disabled = false;
+        window.alert(
+            error.message
+        );
+
+    } finally {
+        button.disabled =
+            false;
+
         button.textContent =
             originalText;
     }
 }
 
 
-if (documentList) {
-    documentList.addEventListener(
-        "click",
-        async (event) => {
-            const button =
-                event.target.closest(
-                    ".ingest-button"
+// ------------------------------------------------------------
+// DOCUMENT LIBRARY BUTTON CLICK
+// ------------------------------------------------------------
+
+if (
+    documentList
+) {
+    documentList
+        .addEventListener(
+            "click",
+            async (event) => {
+                const button =
+                    event.target
+                        .closest(
+                            ".ingest-button"
+                        );
+
+
+                if (!button) {
+                    return;
+                }
+
+
+                await ingestDocument(
+                    button
+                        .dataset
+                        .vendorId,
+
+                    button
+                        .dataset
+                        .documentId,
+
+                    button
+                );
+            }
+        );
+}
+
+
+// ------------------------------------------------------------
+// ASSESSMENT READINESS
+// ------------------------------------------------------------
+
+function setAssessmentReadiness(
+    message,
+    state = "neutral",
+    enabled = false
+) {
+    if (
+        assessmentReadyStatus
+    ) {
+        assessmentReadyStatus
+            .className =
+            `readiness-box ${state}`;
+
+        assessmentReadyStatus
+            .textContent =
+            message;
+    }
+
+
+    if (
+        runAssessmentButton
+    ) {
+        runAssessmentButton
+            .disabled =
+            !enabled;
+    }
+}
+
+
+async function loadAssessmentReadiness(
+    vendorId
+) {
+    if (!vendorId) {
+        setAssessmentReadiness(
+            "Select a vendor to check assessment readiness.",
+            "neutral",
+            false
+        );
+
+        return;
+    }
+
+
+    setAssessmentReadiness(
+        "Checking ready documents...",
+        "neutral",
+        false
+    );
+
+
+    try {
+        const response =
+            await fetch(
+                `/api/vendors/${vendorId}/documents`,
+                {
+                    credentials:
+                        "same-origin",
+                }
+            );
+
+
+        const body =
+            await readJsonSafely(
+                response
+            );
+
+
+        if (
+            !response.ok
+        ) {
+            throw new Error(
+                responseError(
+                    body,
+                    response,
+                    "Unable to check assessment readiness"
+                )
+            );
+        }
+
+
+        const documents =
+            Array.isArray(
+                body
+            )
+                ? body
+                : [];
+
+
+        const readyDocuments =
+            documents
+                .filter(
+                    (doc) =>
+                        doc.status
+                        === "ready"
                 );
 
-            if (!button) {
-                return;
+
+        if (
+            documents.length
+            === 0
+        ) {
+            setAssessmentReadiness(
+                "No documents exist for this vendor. Upload and process documents first.",
+                "warning",
+                false
+            );
+
+            return;
+        }
+
+
+        if (
+            readyDocuments.length
+            === 0
+        ) {
+            const processingCount =
+                documents
+                    .filter(
+                        (doc) =>
+                            [
+                                "upload_pending",
+                                "uploaded",
+                                "processing",
+                                "embedding_pending",
+                                "embedding",
+                                "parsed",
+                            ].includes(
+                                doc.status
+                            )
+                    )
+                    .length;
+
+
+            const failedCount =
+                documents
+                    .filter(
+                        (doc) =>
+                            [
+                                "failed",
+                                "embedding_failed",
+                            ].includes(
+                                doc.status
+                            )
+                    )
+                    .length;
+
+
+            let message =
+                `${
+                    documents.length
+                } document(s), but none are ready yet.`;
+
+
+            if (
+                processingCount
+                > 0
+            ) {
+                message +=
+                    ` ${
+                        processingCount
+                    } still processing.`;
             }
 
-            const vendorId =
-                button.dataset.vendorId;
 
-            const documentId =
-                button.dataset.documentId;
+            if (
+                failedCount
+                > 0
+            ) {
+                message +=
+                    ` ${
+                        failedCount
+                    } failed.`;
+            }
 
-            await ingestDocument(
-                vendorId,
-                documentId,
-                button
+
+            setAssessmentReadiness(
+                message,
+                "warning",
+                false
             );
+
+
+            return;
         }
-    );
+
+
+        setAssessmentReadiness(
+            `${
+                readyDocuments.length
+            } ready document(s). This vendor can be assessed.`,
+            "ready",
+            true
+        );
+
+    } catch (error) {
+        console.error(
+            "Assessment readiness failed:",
+            error
+        );
+
+
+        setAssessmentReadiness(
+            error.message,
+            "error",
+            false
+        );
+    }
 }
 
 
 // ------------------------------------------------------------
-// DOCUMENT VENDOR SELECT
+// ASSESSMENT VENDOR CHANGE
 // ------------------------------------------------------------
 
-if (documentVendor) {
-    documentVendor.addEventListener(
-        "change",
-        async () => {
-            const vendorId =
-                documentVendor.value;
+if (
+    assessmentVendor
+) {
+    assessmentVendor
+        .addEventListener(
+            "change",
+            async () => {
+                clearAssessmentOutput();
 
-            if (!vendorId) {
-                documentList.textContent =
-                    "Select a vendor to view documents.";
 
-                if (assessmentMessage) {
-                    assessmentMessage.textContent =
-                        "";
-                }
-
-                if (assessmentResult) {
-                    assessmentResult.innerHTML =
-                        "";
-                }
-
-                return;
+                await loadAssessmentReadiness(
+                    assessmentVendor
+                        .value
+                );
             }
-
-            await loadDocuments(
-                vendorId
-            );
-
-            if (assessmentMessage) {
-                assessmentMessage.textContent =
-                    "";
-            }
-
-            if (assessmentResult) {
-                assessmentResult.innerHTML =
-                    "";
-            }
-        }
-    );
+        );
 }
 
 
 // ------------------------------------------------------------
-// RUN VENDOR ASSESSMENT
+// RENDER ASSESSMENT RESULT
 // ------------------------------------------------------------
 
-if (runAssessmentButton) {
-    runAssessmentButton.addEventListener(
-        "click",
-        async () => {
-            const vendorId =
-                documentVendor?.value;
+function renderAssessmentResult(
+    body
+) {
+    if (
+        !assessmentResult
+    ) {
+        return;
+    }
 
-            if (!vendorId) {
-                if (assessmentMessage) {
-                    assessmentMessage.textContent =
-                        "Please select a vendor first.";
-                }
 
-                return;
+    const findings =
+        Array.isArray(
+            body.findings
+        )
+            ? body.findings
+            : [];
+
+
+    const summary =
+        body.metadata
+            ?.analysis_summary
+        ||
+        "Assessment completed using grounded vendor evidence.";
+
+
+    let findingsHtml =
+        "";
+
+
+    if (
+        findings.length
+        === 0
+    ) {
+        findingsHtml = `
+            <div class="assessment-empty">
+                No findings were returned for this assessment.
+            </div>
+        `;
+
+    } else {
+        findingsHtml =
+            findings
+                .map(
+                    (
+                        finding,
+                        index
+                    ) => {
+                        const severity =
+                            severityClass(
+                                finding
+                                    .severity
+                            );
+
+
+                        const evidence =
+                            Array.isArray(
+                                finding
+                                    .metadata
+                                    ?.evidence
+                            )
+                                ? finding
+                                    .metadata
+                                    .evidence
+                                : [];
+
+
+                        const evidenceHtml =
+                            evidence.length
+                                ? `
+                                    <div class="finding-evidence">
+
+                                        <strong>
+                                            Evidence sources
+                                        </strong>
+
+                                        <div class="evidence-chips">
+
+                                            ${
+                                                evidence
+                                                    .map(
+                                                        (
+                                                            item
+                                                        ) => `
+                                                            <span class="evidence-chip">
+
+                                                                Doc ${
+                                                                    escapeHtml(
+                                                                        String(
+                                                                            item.document_id
+                                                                            || ""
+                                                                        )
+                                                                        .slice(
+                                                                            0,
+                                                                            8
+                                                                        )
+                                                                    )
+                                                                }
+
+                                                                · Chunk ${
+                                                                    escapeHtml(
+                                                                        String(
+                                                                            item.chunk_id
+                                                                            || ""
+                                                                        )
+                                                                        .slice(
+                                                                            0,
+                                                                            8
+                                                                        )
+                                                                    )
+                                                                }
+
+                                                                · ${
+                                                                    escapeHtml(
+                                                                        Number(
+                                                                            item.similarity
+                                                                            || 0
+                                                                        )
+                                                                        .toFixed(
+                                                                            3
+                                                                        )
+                                                                    )
+                                                                }
+
+                                                            </span>
+                                                        `
+                                                    )
+                                                    .join("")
+                                            }
+
+                                        </div>
+                                    </div>
+                                `
+                                : "";
+
+
+                        return `
+                            <article
+                                class="
+                                    assessment-finding
+                                    finding-${severity}
+                                "
+                            >
+
+                                <div class="finding-top-row">
+
+                                    <div>
+
+                                        <div class="finding-number">
+                                            Finding ${
+                                                index + 1
+                                            }
+                                        </div>
+
+                                        <h4>
+                                            ${escapeHtml(
+                                                finding.title
+                                            )}
+                                        </h4>
+
+                                    </div>
+
+
+                                    <span
+                                        class="
+                                            severity-badge
+                                            severity-${severity}
+                                        "
+                                    >
+                                        ${escapeHtml(
+                                            finding.severity
+                                            || "unrated"
+                                        )}
+                                    </span>
+
+                                </div>
+
+
+                                <div class="finding-meta-grid">
+
+                                    <div>
+                                        <span class="meta-label">
+                                            Category
+                                        </span>
+
+                                        <strong>
+                                            ${escapeHtml(
+                                                formatLabel(
+                                                    finding.category
+                                                )
+                                            )}
+                                        </strong>
+                                    </div>
+
+
+                                    <div>
+                                        <span class="meta-label">
+                                            Type
+                                        </span>
+
+                                        <strong>
+                                            ${escapeHtml(
+                                                formatLabel(
+                                                    finding
+                                                        .metadata
+                                                        ?.finding_type
+                                                    || "other"
+                                                )
+                                            )}
+                                        </strong>
+                                    </div>
+
+
+                                    <div>
+                                        <span class="meta-label">
+                                            Rule
+                                        </span>
+
+                                        <strong>
+                                            ${escapeHtml(
+                                                finding.rule_id
+                                                || "No rule"
+                                            )}
+                                        </strong>
+                                    </div>
+
+
+                                    <div>
+                                        <span class="meta-label">
+                                            Confidence
+                                        </span>
+
+                                        <strong>
+                                            ${escapeHtml(
+                                                finding.confidence
+                                                ?? "Unknown"
+                                            )}
+                                        </strong>
+                                    </div>
+
+                                </div>
+
+
+                                <p class="finding-description">
+                                    ${escapeHtml(
+                                        finding.description
+                                    )}
+                                </p>
+
+
+                                ${evidenceHtml}
+
+                            </article>
+                        `;
+                    }
+                )
+                .join("");
+    }
+
+
+    assessmentResult.innerHTML = `
+        <section class="assessment-output-card">
+
+            <div class="assessment-output-header">
+
+                <div>
+
+                    <div class="eyebrow">
+                        Completed Assessment
+                    </div>
+
+                    <h2>
+                        Vendor Risk Assessment Result
+                    </h2>
+
+                    <p>
+                        ${escapeHtml(
+                            summary
+                        )}
+                    </p>
+
+                </div>
+
+
+                <div
+                    class="
+                        overall-risk
+                        overall-${severityClass(
+                            body.overall_risk
+                        )}
+                    "
+                >
+
+                    <span>
+                        Overall Risk
+                    </span>
+
+                    <strong>
+                        ${escapeHtml(
+                            body.overall_risk
+                            || "unrated"
+                        )}
+                    </strong>
+
+                </div>
+
+            </div>
+
+
+            <div class="assessment-stat-grid">
+
+                <div class="assessment-stat">
+
+                    <span>
+                        Assessment ID
+                    </span>
+
+                    <strong>
+                        ${escapeHtml(
+                            body.id
+                        )}
+                    </strong>
+
+                </div>
+
+
+                <div class="assessment-stat">
+
+                    <span>
+                        Status
+                    </span>
+
+                    <strong>
+                        ${escapeHtml(
+                            body.status
+                        )}
+                    </strong>
+
+                </div>
+
+
+                <div class="assessment-stat">
+
+                    <span>
+                        Type
+                    </span>
+
+                    <strong>
+                        ${escapeHtml(
+                            body.assessment_type
+                        )}
+                    </strong>
+
+                </div>
+
+
+                <div class="assessment-stat">
+
+                    <span>
+                        Findings
+                    </span>
+
+                    <strong>
+                        ${findings.length}
+                    </strong>
+
+                </div>
+
+
+                <div class="assessment-stat">
+
+                    <span>
+                        Overall Score
+                    </span>
+
+                    <strong>
+                        ${escapeHtml(
+                            body.overall_score
+                            ?? "Not calculated"
+                        )}
+                    </strong>
+
+                </div>
+
+
+                <div class="assessment-stat">
+
+                    <span>
+                        Policy
+                    </span>
+
+                    <strong>
+                        ${escapeHtml(
+                            body.metadata
+                                ?.risk_policy_version
+                            || "Not applied"
+                        )}
+                    </strong>
+
+                </div>
+
+            </div>
+
+
+            <div class="assessment-findings">
+
+                ${findingsHtml}
+
+            </div>
+
+        </section>
+    `;
+
+
+    assessmentResult
+        .scrollIntoView(
+            {
+                behavior:
+                    "smooth",
+
+                block:
+                    "start",
             }
+        );
+}
 
-            const csrfToken =
-                runAssessmentButton.dataset.csrfToken;
 
-            if (!csrfToken) {
-                if (assessmentMessage) {
-                    assessmentMessage.textContent =
-                        "Security token is missing. Please refresh the page.";
-                }
+// ------------------------------------------------------------
+// RUN ASSESSMENT
+// ------------------------------------------------------------
 
-                return;
-            }
+if (
+    runAssessmentButton
+) {
+    runAssessmentButton
+        .addEventListener(
+            "click",
+            async () => {
+                const vendorId =
+                    assessmentVendor
+                        ?.value
+                    || "";
 
-            const originalText =
-                runAssessmentButton.textContent;
 
-            runAssessmentButton.disabled =
-                true;
-
-            runAssessmentButton.textContent =
-                "Running assessment...";
-
-            if (assessmentMessage) {
-                assessmentMessage.textContent =
-                    "Analyzing vendor documents. This may take a little while.";
-            }
-
-            if (assessmentResult) {
-                assessmentResult.innerHTML =
-                    "";
-            }
-
-            try {
-                const response =
-                    await fetch(
-                        `/api/vendors/${vendorId}/assessments`,
-                        {
-                            method: "POST",
-
-                            credentials:
-                                "same-origin",
-
-                            headers: {
-                                "X-CSRF-Token":
-                                    csrfToken,
-                            },
-                        }
+                if (!vendorId) {
+                    setMessage(
+                        assessmentMessage,
+                        "Please select an assessment vendor."
                     );
 
-                let body = {};
+                    return;
+                }
+
+
+                const csrfToken =
+                    runAssessmentButton
+                        .dataset
+                        .csrfToken;
+
+
+                if (!csrfToken) {
+                    setMessage(
+                        assessmentMessage,
+                        "Security token is missing. Refresh the page and try again."
+                    );
+
+                    return;
+                }
+
+
+                const originalText =
+                    runAssessmentButton
+                        .textContent;
+
+
+                runAssessmentButton
+                    .disabled =
+                    true;
+
+
+                runAssessmentButton
+                    .textContent =
+                    "Running assessment...";
+
+
+                setMessage(
+                    assessmentMessage,
+                    "Retrieving vendor evidence and running grounded risk analysis..."
+                );
+
+
+                if (
+                    assessmentResult
+                ) {
+                    assessmentResult
+                        .innerHTML =
+                        "";
+                }
+
 
                 try {
-                    body =
-                        await response.json();
-                } catch {
-                    body = {};
-                }
+                    const response =
+                        await fetch(
+                            `/api/vendors/${vendorId}/assessments`,
+                            {
+                                method:
+                                    "POST",
 
-                if (!response.ok) {
-                    throw new Error(
-                        body.detail ||
-                        `Assessment failed with status ${response.status}`
+                                credentials:
+                                    "same-origin",
+
+                                headers: {
+                                    "X-CSRF-Token":
+                                        csrfToken,
+                                },
+                            }
+                        );
+
+
+                    const body =
+                        await readJsonSafely(
+                            response
+                        );
+
+
+                    if (
+                        !response.ok
+                    ) {
+                        throw new Error(
+                            responseError(
+                                body,
+                                response,
+                                "Assessment creation failed"
+                            )
+                        );
+                    }
+
+
+                    setMessage(
+                        assessmentMessage,
+                        "Assessment completed successfully."
+                    );
+
+
+                    renderAssessmentResult(
+                        body
+                    );
+
+                } catch (error) {
+                    console.error(
+                        "Assessment failed:",
+                        error
+                    );
+
+
+                    setMessage(
+                        assessmentMessage,
+                        error.message
+                    );
+
+
+                    if (
+                        assessmentResult
+                    ) {
+                        assessmentResult
+                            .innerHTML = `
+                                <div class="assessment-error-card">
+
+                                    <strong>
+                                        Assessment could not be completed.
+                                    </strong>
+
+                                    <p>
+                                        ${escapeHtml(
+                                            error.message
+                                        )}
+                                    </p>
+
+                                    <p>
+                                        Check the Northflank logs
+                                        for this request before
+                                        running another assessment.
+                                    </p>
+
+                                </div>
+                            `;
+                    }
+
+                } finally {
+                    runAssessmentButton
+                        .textContent =
+                        originalText;
+
+
+                    // Re-check whether the vendor
+                    // still has ready documents.
+                    await loadAssessmentReadiness(
+                        vendorId
                     );
                 }
-
-                if (assessmentMessage) {
-                    assessmentMessage.textContent =
-                        "Assessment completed successfully.";
-                }
-
-                const findings =
-                    body.findings || [];
-
-                let findingsHtml =
-                    "";
-
-                for (const finding of findings) {
-                    findingsHtml += `
-                        <div class="assessment-finding">
-
-                            <h4>
-                                ${escapeHtml(
-                                    finding.title
-                                )}
-                            </h4>
-
-                            <p>
-                                <strong>
-                                    Category:
-                                </strong>
-
-                                ${escapeHtml(
-                                    finding.category
-                                )}
-                            </p>
-
-                            <p>
-                                <strong>
-                                    Severity:
-                                </strong>
-
-                                ${escapeHtml(
-                                    finding.severity
-                                )}
-                            </p>
-
-                            <p>
-                                <strong>
-                                    Rule:
-                                </strong>
-
-                                ${escapeHtml(
-                                    finding.rule_id ||
-                                    "None"
-                                )}
-                            </p>
-
-                            <p>
-                                <strong>
-                                    Confidence:
-                                </strong>
-
-                                ${escapeHtml(
-                                    finding.confidence ??
-                                    "Unknown"
-                                )}
-                            </p>
-
-                            <p>
-                                ${escapeHtml(
-                                    finding.description
-                                )}
-                            </p>
-
-                        </div>
-                    `;
-                }
-
-                if (assessmentResult) {
-                    assessmentResult.innerHTML = `
-                        <div class="assessment-summary">
-
-                            <h3>
-                                Assessment Result
-                            </h3>
-
-                            <p>
-                                <strong>
-                                    Assessment ID:
-                                </strong>
-
-                                ${escapeHtml(
-                                    body.id
-                                )}
-                            </p>
-
-                            <p>
-                                <strong>
-                                    Status:
-                                </strong>
-
-                                ${escapeHtml(
-                                    body.status
-                                )}
-                            </p>
-
-                            <p>
-                                <strong>
-                                    Assessment Type:
-                                </strong>
-
-                                ${escapeHtml(
-                                    body.assessment_type
-                                )}
-                            </p>
-
-                            <p>
-                                <strong>
-                                    Overall Risk:
-                                </strong>
-
-                                ${escapeHtml(
-                                    body.overall_risk ||
-                                    "Unrated"
-                                )}
-                            </p>
-
-                            <p>
-                                <strong>
-                                    Overall Score:
-                                </strong>
-
-                                ${escapeHtml(
-                                    body.overall_score ??
-                                    "Not calculated"
-                                )}
-                            </p>
-
-                            <p>
-                                <strong>
-                                    Findings:
-                                </strong>
-
-                                ${findings.length}
-                            </p>
-
-                        </div>
-
-
-                        <div class="assessment-findings">
-                            ${findingsHtml}
-                        </div>
-                    `;
-                }
-
-            } catch (error) {
-                console.error(
-                    "Assessment failed:",
-                    error
-                );
-
-                if (assessmentMessage) {
-                    assessmentMessage.textContent =
-                        error.message;
-                }
-
-            } finally {
-                runAssessmentButton.disabled =
-                    false;
-
-                runAssessmentButton.textContent =
-                    originalText;
             }
-        }
-    );
-}
-
-
-// ------------------------------------------------------------
-// FILE SIZE DISPLAY
-// ------------------------------------------------------------
-
-function formatFileSize(bytes) {
-    if (
-        bytes === null ||
-        bytes === undefined
-    ) {
-        return "";
-    }
-
-    if (bytes < 1024) {
-        return `${bytes} B`;
-    }
-
-    if (bytes < 1024 * 1024) {
-        return `${
-            (bytes / 1024).toFixed(1)
-        } KB`;
-    }
-
-    return `${
-        (
-            bytes /
-            (1024 * 1024)
-        ).toFixed(1)
-    } MB`;
+        );
 }
 
 
@@ -1126,8 +2316,36 @@ function formatFileSize(bytes) {
 
 async function initializePage() {
     await loadVendors();
+
+
+    if (
+        documentLibraryVendor
+            ?.value
+    ) {
+        await loadDocuments(
+            documentLibraryVendor
+                .value
+        );
+    }
+
+
+    if (
+        assessmentVendor
+            ?.value
+    ) {
+        await loadAssessmentReadiness(
+            assessmentVendor
+                .value
+        );
+
+    } else {
+        setAssessmentReadiness(
+            "Select a vendor to check assessment readiness.",
+            "neutral",
+            false
+        );
+    }
 }
 
 
-// Start application
 initializePage();

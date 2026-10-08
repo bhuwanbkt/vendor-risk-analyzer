@@ -61,9 +61,19 @@ router = APIRouter(
 )
 
 
+# ============================================================
+# RESPONSE BUILDERS
+# ============================================================
+
+
 def build_finding_response(
     finding: Finding,
 ) -> AssessmentFindingResponse:
+    """
+    Convert a Finding ORM model into
+    the API response schema.
+    """
+
     return AssessmentFindingResponse(
         id=finding.id,
         assessment_id=(
@@ -120,6 +130,16 @@ async def load_assessment_response(
     db: AsyncSession,
     assessment_id: UUID,
 ) -> AssessmentResponse:
+    """
+    Load the final persisted assessment
+    and all findings from PostgreSQL.
+
+    The API intentionally returns what
+    actually exists in the database
+    instead of reconstructing the final
+    response from intermediate objects.
+    """
+
     assessment = await db.get(
         Assessment,
         assessment_id,
@@ -197,6 +217,11 @@ async def load_assessment_response(
     )
 
 
+# ============================================================
+# GET ASSESSMENT
+# ============================================================
+
+
 @router.get(
     "/api/assessments/{assessment_id}",
     response_model=AssessmentResponse,
@@ -214,6 +239,12 @@ async def get_assessment(
         )
     ),
 ):
+    """
+    Read an existing assessment.
+
+    This endpoint is read-only.
+    """
+
     logger.info(
         "Assessment API read started. "
         "assessment_id=%s",
@@ -244,6 +275,11 @@ async def get_assessment(
     return response
 
 
+# ============================================================
+# CREATE ASSESSMENT
+# ============================================================
+
+
 @router.post(
     "/api/vendors/{vendor_id}/assessments",
     response_model=AssessmentResponse,
@@ -268,11 +304,27 @@ async def create_assessment(
     Run a complete vendor risk assessment.
 
     Flow:
+
+        vendor_id
+            ↓
         semantic retrieval
-        -> grounded LLM analysis
-        -> assessment persistence
-        -> deterministic policy
-        -> completed API response
+            ↓
+        grounded LLM analysis
+            ↓
+        assessment persistence
+            ↓
+        deterministic risk policy
+            ↓
+        persisted AssessmentResponse
+
+    Important:
+
+    - vendor scope is explicit
+    - no cross-vendor fallback
+    - LLM findings must cite retrieved evidence
+    - LLM does not assign final severity
+    - deterministic policy assigns severity
+    - no numeric overall score is invented
     """
 
     logger.info(
@@ -281,14 +333,28 @@ async def create_assessment(
         vendor_id,
     )
 
+    # --------------------------------------------------------
+    # FastAPI converts the path parameter to UUID.
+    #
+    # RiskAnalysisService currently returns a
+    # VendorRiskAnalysisResult whose vendor_id
+    # field expects a string.
+    #
+    # Normalize once at the API boundary.
+    # --------------------------------------------------------
+
+    normalized_vendor_id = str(
+        vendor_id
+    )
+
     embedding_service = None
     risk_service = None
 
     try:
-        # ----------------------------------------------------
+        # ====================================================
         # STEP 1
-        # Create retrieval dependencies.
-        # ----------------------------------------------------
+        # Create embedding + retrieval dependencies
+        # ====================================================
 
         embedding_service = (
             EmbeddingService()
@@ -300,13 +366,11 @@ async def create_assessment(
             )
         )
 
-        # ----------------------------------------------------
+
+        # ====================================================
         # STEP 2
-        # Run grounded vendor risk analysis.
-        #
-        # RiskAnalysisService itself does not
-        # persist database rows.
-        # ----------------------------------------------------
+        # Create the grounded risk analysis service
+        # ====================================================
 
         risk_service = (
             RiskAnalysisService(
@@ -314,15 +378,27 @@ async def create_assessment(
             )
         )
 
+
+        # ====================================================
+        # STEP 3
+        # Run vendor-scoped retrieval + LLM analysis
+        #
+        # IMPORTANT FIX:
+        #
+        # Pass normalized_vendor_id as STRING,
+        # not FastAPI's UUID object.
+        # ====================================================
+
         analysis = (
             await risk_service
             .analyze_vendor(
                 db=db,
                 vendor_id=(
-                    vendor_id
+                    normalized_vendor_id
                 ),
             )
         )
+
 
         logger.info(
             "Assessment API analysis "
@@ -330,7 +406,7 @@ async def create_assessment(
             "vendor_id=%s "
             "raw_findings=%s "
             "normalized_findings=%s",
-            vendor_id,
+            normalized_vendor_id,
             (
                 analysis
                 .raw_finding_count
@@ -341,15 +417,19 @@ async def create_assessment(
             ),
         )
 
-        # ----------------------------------------------------
-        # STEP 3
-        # Persist the grounded assessment.
+
+        # ====================================================
+        # STEP 4
+        # Persist grounded findings
         #
-        # Findings initially persist with:
+        # Persistence initially stores:
         #
         # severity = unrated
         # overall_risk = NULL
-        # ----------------------------------------------------
+        # overall_score = NULL
+        #
+        # The deterministic policy runs next.
+        # ====================================================
 
         persistence_service = (
             AssessmentPersistenceService()
@@ -363,29 +443,31 @@ async def create_assessment(
             )
         )
 
+
         logger.info(
             "Assessment API persistence "
             "completed. "
             "vendor_id=%s "
-            "assessment_id=%s "
-            "findings=%s",
-            vendor_id,
+            "assessment_id=%s",
+            normalized_vendor_id,
             persisted.assessment_id,
-            persisted.finding_count,
         )
 
-        # ----------------------------------------------------
-        # STEP 4
-        # Apply deterministic policy.
+
+        # ====================================================
+        # STEP 5
+        # Apply deterministic risk policy
         #
-        # This updates:
-        #   findings.severity
-        #   findings.rule_id
-        #   assessment.overall_risk
+        # This may update:
         #
-        # It still does NOT create an
-        # overall numeric score.
-        # ----------------------------------------------------
+        # findings.severity
+        # findings.rule_id
+        # findings.metadata
+        # assessment.overall_risk
+        # assessment.metadata
+        #
+        # It does NOT invent an overall_score.
+        # ====================================================
 
         policy_service = (
             RiskPolicyService()
@@ -402,6 +484,7 @@ async def create_assessment(
             )
         )
 
+
         logger.info(
             "Assessment API policy "
             "completed. "
@@ -414,15 +497,14 @@ async def create_assessment(
             ),
         )
 
-        # ----------------------------------------------------
-        # STEP 5
-        # Load the final database state.
+
+        # ====================================================
+        # STEP 6
+        # Read final persisted state
         #
-        # We deliberately return what was
-        # actually persisted instead of
-        # reconstructing the response from
-        # intermediate Python objects.
-        # ----------------------------------------------------
+        # We return the actual PostgreSQL state
+        # after persistence + policy application.
+        # ====================================================
 
         response = (
             await load_assessment_response(
@@ -434,6 +516,7 @@ async def create_assessment(
             )
         )
 
+
         logger.info(
             "Assessment API creation "
             "completed. "
@@ -441,7 +524,7 @@ async def create_assessment(
             "assessment_id=%s "
             "overall_risk=%s "
             "findings=%s",
-            vendor_id,
+            normalized_vendor_id,
             response.id,
             response.overall_risk,
             len(
@@ -449,7 +532,13 @@ async def create_assessment(
             ),
         )
 
+
         return response
+
+
+    # ========================================================
+    # VENDOR NOT FOUND
+    # ========================================================
 
     except VendorNotFoundError as exc:
         logger.warning(
@@ -457,7 +546,7 @@ async def create_assessment(
             "failed. "
             "vendor_id=%s "
             "reason=vendor_not_found",
-            vendor_id,
+            normalized_vendor_id,
         )
 
         raise HTTPException(
@@ -469,12 +558,17 @@ async def create_assessment(
             ),
         ) from exc
 
+
+    # ========================================================
+    # GROUNDING VALIDATION FAILURE
+    # ========================================================
+
     except RiskAnalysisGroundingError as exc:
         logger.exception(
             "Assessment API grounding "
             "validation failed. "
             "vendor_id=%s",
-            vendor_id,
+            normalized_vendor_id,
         )
 
         raise HTTPException(
@@ -487,12 +581,17 @@ async def create_assessment(
             ),
         ) from exc
 
+
+    # ========================================================
+    # RISK ANALYSIS FAILURE
+    # ========================================================
+
     except RiskAnalysisError as exc:
         logger.exception(
             "Assessment API risk analysis "
             "failed. "
             "vendor_id=%s",
-            vendor_id,
+            normalized_vendor_id,
         )
 
         raise HTTPException(
@@ -504,12 +603,17 @@ async def create_assessment(
             ),
         ) from exc
 
+
+    # ========================================================
+    # PERSISTENCE FAILURE
+    # ========================================================
+
     except AssessmentPersistenceError as exc:
         logger.exception(
             "Assessment API persistence "
             "failed. "
             "vendor_id=%s",
-            vendor_id,
+            normalized_vendor_id,
         )
 
         raise HTTPException(
@@ -522,12 +626,17 @@ async def create_assessment(
             ),
         ) from exc
 
+
+    # ========================================================
+    # POLICY FAILURE
+    # ========================================================
+
     except RiskPolicyError as exc:
         logger.exception(
             "Assessment API policy "
             "application failed. "
             "vendor_id=%s",
-            vendor_id,
+            normalized_vendor_id,
         )
 
         raise HTTPException(
@@ -540,15 +649,25 @@ async def create_assessment(
             ),
         ) from exc
 
+
+    # ========================================================
+    # EXISTING FASTAPI HTTP ERRORS
+    # ========================================================
+
     except HTTPException:
         raise
+
+
+    # ========================================================
+    # UNEXPECTED FAILURE
+    # ========================================================
 
     except Exception as exc:
         logger.exception(
             "Assessment API creation "
             "failed unexpectedly. "
             "vendor_id=%s",
-            vendor_id,
+            normalized_vendor_id,
         )
 
         raise HTTPException(
@@ -560,13 +679,23 @@ async def create_assessment(
             ),
         ) from exc
 
+
+    # ========================================================
+    # CLEANUP
+    # ========================================================
+
     finally:
-        # RiskAnalysisService owns the
-        # Gemini analysis client.
-        if risk_service is not None:
+        # Close the risk-analysis client.
+        if (
+            risk_service
+            is not None
+        ):
             risk_service.close()
 
-        # EmbeddingService owns the
-        # Gemini embedding client.
-        if embedding_service is not None:
+
+        # Close the embedding client.
+        if (
+            embedding_service
+            is not None
+        ):
             await embedding_service.close()

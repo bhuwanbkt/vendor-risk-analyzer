@@ -1,47 +1,25 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vendor Risk Analyzer</title>
 
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
-
-    <title>
-        Vendor Risk Analyzer
-    </title>
-
-    <link
-        rel="stylesheet"
-        href="/static/style.css"
-    >
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/workspace.css?v=1">
 </head>
 
-
 <body>
-
     <header class="header">
-
         <div>
-            <h1>
-                Vendor Risk Analyzer
-            </h1>
-
-            <p>
-                AI-powered vendor security and compliance assessment
-            </p>
+            <h1>Vendor Risk Analyzer</h1>
+            <p>AI-powered vendor security and compliance assessment</p>
         </div>
 
-
         <div>
-
             {% if user %}
-
                 <span>
                     Signed in as
-
                     <strong>
                         {{
                             user.name
@@ -52,437 +30,274 @@
                     </strong>
                 </span>
 
-                <a href="/auth/logout">
-                    Logout
-                </a>
-
+                <a href="/auth/logout">Logout</a>
             {% else %}
-
-                <a href="/auth/login">
-                    Sign in
-                </a>
-
+                <a href="/auth/login">Sign in</a>
             {% endif %}
-
         </div>
 
-
-        <span class="status">
-            ● Service Online
-        </span>
-
+        <span class="status">● Service Online</span>
     </header>
 
-
     <main class="container">
-
-
-        <!-- ================================================= -->
-        <!-- INTRO -->
-        <!-- ================================================= -->
-
         <section class="intro">
-
-            <h2>
-                Risk Assessment Dashboard
-            </h2>
-
+            <h2>Risk Assessment Dashboard</h2>
             <p>
-                Analyze vendor documentation,
-                identify risks, and verify findings
-                against source evidence.
+                Analyze vendor documentation, identify risks,
+                and verify findings against source evidence.
             </p>
-
         </section>
-
-
-        <!-- ================================================= -->
-        <!-- DASHBOARD CARDS -->
-        <!-- ================================================= -->
 
         <section class="cards">
-
             <article class="card">
-
-                <h3>
-                    Vendors
-                </h3>
-
-                <div class="number">
-                    0
-                </div>
-
-                <p>
-                    Vendors under assessment
-                </p>
-
+                <h3>Vendors</h3>
+                <div class="number" id="vendor-count">0</div>
+                <p>Vendors under assessment</p>
             </article>
 
-
             <article class="card">
-
-                <h3>
-                    Assessments
-                </h3>
-
-                <div class="number">
-                    0
-                </div>
-
-                <p>
-                    Completed assessments
-                </p>
-
+                <h3>Assessments</h3>
+                <div class="number">—</div>
+                <p>Completed assessments</p>
             </article>
 
-
             <article class="card">
-
-                <h3>
-                    High Risk Findings
-                </h3>
-
-                <div class="number">
-                    0
-                </div>
-
-                <p>
-                    Require investigation
-                </p>
-
+                <h3>Risk Findings</h3>
+                <div class="number">—</div>
+                <p>Evidence-backed findings</p>
             </article>
 
-
             <article class="card">
-
-                <h3>
-                    MCP Server
-                </h3>
-
-                <div class="service-state">
-                    Coming Soon
-                </div>
-
-                <p>
-                    External tool access
-                </p>
-
+                <h3>MCP Server</h3>
+                <div class="service-state">Coming Soon</div>
+                <p>External tool access</p>
             </article>
-
         </section>
-
 
         {% if user %}
 
-
-        <!-- ================================================= -->
-        <!-- VENDORS -->
-        <!-- ================================================= -->
-
         <section class="vendor-section">
-
             <div class="section-header">
-
                 <div>
-
-                    <h2>
-                        Vendors
-                    </h2>
-
+                    <h2>Vendor Management</h2>
                     <p>
-                        Vendors currently registered
-                        for risk assessment.
+                        Register vendors independently from document and
+                        assessment workflows.
                     </p>
-
                 </div>
-
             </div>
 
+            <div class="vendor-management-grid">
+                {% if "admin" in user.roles or "analyst" in user.roles %}
+                <div class="vendor-form-card workspace-panel compact-panel">
+                    <div class="panel-heading-row">
+                        <div class="panel-step">01</div>
+                        <div>
+                            <h3>Add Vendor</h3>
+                            <p class="panel-description">
+                                Create the vendor record first.
+                            </p>
+                        </div>
+                    </div>
 
-            {% if "admin" in user.roles or "analyst" in user.roles %}
-
-            <div class="vendor-form-card">
-
-                <h3>
-                    Add Vendor
-                </h3>
-
-                <form
-                    id="vendor-form"
-                    data-csrf-token="{{ csrf_token }}"
-                >
-
-                    <label for="vendor-name">
-                        Vendor Name
-                    </label>
-
-                    <input
-                        id="vendor-name"
-                        name="name"
-                        type="text"
-                        maxlength="255"
-                        required
+                    <form
+                        id="vendor-form"
+                        data-csrf-token="{{ csrf_token }}"
                     >
+                        <label for="vendor-name">Vendor Name</label>
+                        <input
+                            id="vendor-name"
+                            name="name"
+                            type="text"
+                            maxlength="255"
+                            required
+                        >
 
+                        <label for="vendor-website">Website</label>
+                        <input
+                            id="vendor-website"
+                            name="website"
+                            type="url"
+                            maxlength="500"
+                            placeholder="https://example.com"
+                        >
 
-                    <label for="vendor-website">
-                        Website
-                    </label>
-
-                    <input
-                        id="vendor-website"
-                        name="website"
-                        type="url"
-                        maxlength="500"
-                        placeholder="https://example.com"
-                    >
-
-
-                    <button type="submit">
-                        Create Vendor
-                    </button>
-
-
-                    <p id="vendor-message"></p>
-
-                </form>
-
-            </div>
-
-            {% endif %}
-
-
-            <div class="vendor-list-card">
-
-                <h3>
-                    Registered Vendors
-                </h3>
-
-                <div id="vendor-list">
-                    Loading vendors...
+                        <button type="submit">Create Vendor</button>
+                        <p id="vendor-message" class="inline-message"></p>
+                    </form>
                 </div>
+                {% endif %}
 
+                <div class="vendor-list-card workspace-panel compact-panel">
+                    <div class="panel-heading-row">
+                        <div class="panel-step">V</div>
+                        <div>
+                            <h3>Registered Vendors</h3>
+                            <p class="panel-description">
+                                Vendors available to every workspace below.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div id="vendor-list">Loading vendors...</div>
+                </div>
             </div>
-
         </section>
 
+        <section class="workspace-section">
+            <div class="section-header workspace-title-row">
+                <div>
+                    <h2>Vendor Workspaces</h2>
+                    <p>
+                        Upload, review, and assess vendors independently.
+                        Each workspace has its own vendor selection.
+                    </p>
+                </div>
+            </div>
 
-        <!-- ================================================= -->
-        <!-- DOCUMENTS -->
-        <!-- ================================================= -->
+            <div class="workspace-grid">
+                {% if "admin" in user.roles or "analyst" in user.roles %}
+                <article class="workspace-panel workflow-card">
+                    <div class="panel-heading-row">
+                        <div class="panel-step">02</div>
+                        <div>
+                            <h3>Upload Documents</h3>
+                            <p class="panel-description">
+                                Choose a vendor only for this upload.
+                            </p>
+                        </div>
+                    </div>
 
-        <section class="document-section">
+                    <form
+                        id="document-upload-form"
+                        data-csrf-token="{{ csrf_token }}"
+                    >
+                        <label for="upload-vendor">Upload to vendor</label>
+                        <select id="upload-vendor" required>
+                            <option value="">Select vendor</option>
+                        </select>
 
-            <h2>
-                Vendor Documents
-            </h2>
+                        <label for="document-file">Document</label>
+                        <input
+                            id="document-file"
+                            type="file"
+                            accept=".pdf,.docx,.xlsx,.csv,.txt,.md"
+                            required
+                        >
 
+                        <div class="helper-text">
+                            PDF, DOCX, XLSX, CSV, TXT or Markdown · max 25 MB
+                        </div>
 
-            {% if "admin" in user.roles or "analyst" in user.roles %}
+                        <button type="submit" class="primary-action">
+                            Upload Document
+                        </button>
 
-            <div class="document-upload-card">
+                        <p id="document-upload-message" class="inline-message"></p>
+                    </form>
+                </article>
+                {% endif %}
 
-                <h3>
-                    Upload Document
-                </h3>
+                <article class="workspace-panel workflow-card">
+                    <div class="panel-heading-row">
+                        <div class="panel-step">03</div>
+                        <div>
+                            <h3>Document Library</h3>
+                            <p class="panel-description">
+                                Select a vendor separately to review and parse files.
+                            </p>
+                        </div>
+                    </div>
 
-                <form
-                    id="document-upload-form"
-                    data-csrf-token="{{ csrf_token }}"
-                >
-
-                    <label for="document-vendor">
-                        Vendor
+                    <label for="document-library-vendor">
+                        Browse vendor documents
                     </label>
 
-                    <select
-                        id="document-vendor"
-                        required
-                    >
-
-                        <option value="">
-                            Select vendor
-                        </option>
-
+                    <select id="document-library-vendor">
+                        <option value="">Select vendor</option>
                     </select>
 
+                    <div class="library-header">
+                        <span>Documents</span>
+                        <span id="document-count" class="count-pill">0</span>
+                    </div>
 
-                    <label for="document-file">
-                        Document
-                    </label>
+                    <div id="document-list" class="workspace-list empty-state">
+                        Select a vendor to view documents.
+                    </div>
+                </article>
 
-                    <input
-                        id="document-file"
-                        type="file"
-                        accept=".pdf,.docx,.xlsx,.csv,.txt,.md"
-                        required
+                {% if "admin" in user.roles or "analyst" in user.roles %}
+                <article class="workspace-panel workflow-card assessment-workspace">
+                    <div class="panel-heading-row">
+                        <div class="panel-step">04</div>
+                        <div>
+                            <h3>Risk Assessment</h3>
+                            <p class="panel-description">
+                                Choose the vendor you want to assess independently.
+                            </p>
+                        </div>
+                    </div>
+
+                    <label for="assessment-vendor">Assessment vendor</label>
+                    <select id="assessment-vendor">
+                        <option value="">Select vendor</option>
+                    </select>
+
+                    <div
+                        id="assessment-ready-status"
+                        class="readiness-box neutral"
                     >
+                        Select a vendor to check assessment readiness.
+                    </div>
 
-
-                    <button type="submit">
-                        Upload Document
+                    <button
+                        id="run-assessment-button"
+                        type="button"
+                        class="primary-action assessment-action"
+                        data-csrf-token="{{ csrf_token or '' }}"
+                        disabled
+                    >
+                        Run Assessment
                     </button>
 
-
-                    <p id="document-upload-message"></p>
-
-                </form>
-
+                    <p id="assessment-message" class="inline-message"></p>
+                </article>
+                {% endif %}
             </div>
 
+            {% if "admin" in user.roles or "analyst" in user.roles %}
+            <div id="assessment-result" class="assessment-result-shell"></div>
             {% endif %}
-
-
-            <div class="document-list-card">
-
-                <h3>
-                    Documents
-                </h3>
-
-                <div id="document-list">
-                    Select a vendor to view documents.
-                </div>
-
-            </div>
-
-        </section>
-
-
-        <!-- ================================================= -->
-        <!-- VENDOR RISK ASSESSMENT -->
-        <!-- ================================================= -->
-
-        {% if "admin" in user.roles or "analyst" in user.roles %}
-
-        <section class="assessment-section">
-
-            <div class="section-header">
-
-                <div>
-
-                    <h2>
-                        Vendor Risk Assessment
-                    </h2>
-
-                    <p>
-                        Select a vendor above and run
-                        a grounded AI risk assessment
-                        against its ready documents.
-                    </p>
-
-                </div>
-
-            </div>
-
-
-            <div class="assessment-card">
-
-                <h3>
-                    Run Assessment
-                </h3>
-
-                <p>
-                    The assessment will retrieve
-                    vendor-scoped evidence, analyze
-                    grounded risks, persist findings,
-                    and apply deterministic risk policy.
-                </p>
-
-
-                <button
-                    id="run-assessment-button"
-                    type="button"
-                    data-csrf-token="{{ csrf_token or '' }}"
-                >
-                    Run Assessment
-                </button>
-
-
-                <p id="assessment-message"></p>
-
-
-                <div id="assessment-result">
-                </div>
-
-            </div>
-
         </section>
 
         {% endif %}
-
-
-        {% endif %}
-
-
-        <!-- ================================================= -->
-        <!-- SYSTEM STATUS -->
-        <!-- ================================================= -->
 
         <section class="system">
-
-            <h2>
-                System Status
-            </h2>
-
+            <h2>System Status</h2>
 
             <div class="system-row">
-
-                <span>
-                    API
-                </span>
-
-                <strong>
-                    Online
-                </strong>
-
+                <span>API</span>
+                <strong>Online</strong>
             </div>
-
 
             <div class="system-row">
-
-                <span>
-                    Database
-                </span>
-
-                <strong>
-                    Not Connected
-                </strong>
-
+                <span>Database</span>
+                <strong>Connected</strong>
             </div>
-
 
             <div class="system-row">
-
-                <span>
-                    Vector Search
-                </span>
-
-                <strong>
-                    Not Configured
-                </strong>
-
+                <span>Vector Search</span>
+                <strong>Ready</strong>
             </div>
-
 
             <div class="system-row">
-
-                <span>
-                    LLM Provider
-                </span>
-
-                <strong>
-                    Not Configured
-                </strong>
-
+                <span>LLM Provider</span>
+                <strong>Configured</strong>
             </div>
-
         </section>
-
     </main>
 
-
-    <script src="/static/app.js?v=3"></script>
-
+    <script src="/static/app.js?v=5"></script>
 </body>
-
 </html>
