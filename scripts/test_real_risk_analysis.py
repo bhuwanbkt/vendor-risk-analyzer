@@ -355,7 +355,27 @@ def validate_analysis(
     *,
     analysis: EvidenceAnalysis,
     evidence: list[RetrievalResult],
-) -> None:
+    ) -> None:
+
+    original_finding_count = len(
+        analysis.findings
+    )
+
+    analysis = deduplicate_findings(
+        analysis
+    )
+
+    deduplicated_count = len(
+        analysis.findings
+    )
+
+    print()
+    print(
+        "Finding normalization: "
+        f"{original_finding_count} -> "
+        f"{deduplicated_count}"
+    )
+
     allowed_chunk_ids = {
         item.chunk_id
         for item in evidence
@@ -398,6 +418,122 @@ def validate_analysis(
                 "chunks."
             )
 
+# ============================================================
+# Deduplicate validation
+# ============================================================
+
+def deduplicate_findings(
+    analysis: EvidenceAnalysis,
+) -> EvidenceAnalysis:
+    """
+    Collapse findings that describe the same
+    underlying issue using overlapping evidence.
+
+    This is deterministic post-processing.
+    It does not make another LLM request.
+    """
+
+    priority = {
+        "explicit_risk": 3,
+        "contradiction": 2,
+        "evidence_gap": 1,
+    }
+
+    deduplicated: list[
+        RiskSignal
+    ] = []
+
+    for finding in analysis.findings:
+        finding_ids = set(
+            finding.evidence_chunk_ids
+        )
+
+        duplicate_index = None
+
+        for index, existing in enumerate(
+            deduplicated
+        ):
+            existing_ids = set(
+                existing.evidence_chunk_ids
+            )
+
+            same_category = (
+                existing.category
+                == finding.category
+            )
+
+            evidence_overlap = bool(
+                existing_ids
+                & finding_ids
+            )
+
+            if (
+                same_category
+                and evidence_overlap
+            ):
+                duplicate_index = index
+                break
+
+        if duplicate_index is None:
+            deduplicated.append(
+                finding
+            )
+
+            continue
+
+        existing = deduplicated[
+            duplicate_index
+        ]
+
+        combined_ids = list(
+            dict.fromkeys(
+                existing.evidence_chunk_ids
+                + finding.evidence_chunk_ids
+            )
+        )
+
+        if (
+            priority[
+                finding.finding_type
+            ]
+            >
+            priority[
+                existing.finding_type
+            ]
+        ):
+            preferred = finding
+
+        else:
+            preferred = existing
+
+        deduplicated[
+            duplicate_index
+        ] = RiskSignal(
+            finding_type=(
+                preferred.finding_type
+            ),
+            category=(
+                preferred.category
+            ),
+            title=(
+                preferred.title
+            ),
+            description=(
+                preferred.description
+            ),
+            evidence_chunk_ids=(
+                combined_ids
+            ),
+            confidence=max(
+                existing.confidence,
+                finding.confidence,
+            ),
+        )
+
+    return EvidenceAnalysis(
+        summary=analysis.summary,
+        findings=deduplicated,
+    )
 
 # ============================================================
 # Display helpers
