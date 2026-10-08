@@ -1,22 +1,47 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vendor Risk Analyzer</title>
-    <link rel="stylesheet" href="/static/style.css">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        Vendor Risk Analyzer
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="/static/style.css"
+    >
 </head>
 
+
 <body>
+
     <header class="header">
+
         <div>
-            <h1>Vendor Risk Analyzer</h1>
-            <p>AI-powered vendor security and compliance assessment</p>
+            <h1>
+                Vendor Risk Analyzer
+            </h1>
+
+            <p>
+                AI-powered vendor security and compliance assessment
+            </p>
         </div>
+
+
         <div>
+
             {% if user %}
+
                 <span>
                     Signed in as
+
                     <strong>
                         {{
                             user.name
@@ -30,76 +55,157 @@
                 <a href="/auth/logout">
                     Logout
                 </a>
+
             {% else %}
+
                 <a href="/auth/login">
                     Sign in
                 </a>
+
             {% endif %}
+
         </div>
+
 
         <span class="status">
             ● Service Online
         </span>
+
     </header>
+
 
     <main class="container">
 
+
+        <!-- ================================================= -->
+        <!-- INTRO -->
+        <!-- ================================================= -->
+
         <section class="intro">
-            <h2>Risk Assessment Dashboard</h2>
+
+            <h2>
+                Risk Assessment Dashboard
+            </h2>
+
             <p>
-                Analyze vendor documentation, identify risks,
-                and verify findings against source evidence.
+                Analyze vendor documentation,
+                identify risks, and verify findings
+                against source evidence.
             </p>
+
         </section>
+
+
+        <!-- ================================================= -->
+        <!-- DASHBOARD CARDS -->
+        <!-- ================================================= -->
 
         <section class="cards">
 
             <article class="card">
-                <h3>Vendors</h3>
-                <div class="number">0</div>
-                <p>Vendors under assessment</p>
+
+                <h3>
+                    Vendors
+                </h3>
+
+                <div class="number">
+                    0
+                </div>
+
+                <p>
+                    Vendors under assessment
+                </p>
+
             </article>
 
-            <article class="card">
-                <h3>Assessments</h3>
-                <div class="number">0</div>
-                <p>Completed assessments</p>
-            </article>
 
             <article class="card">
-                <h3>High Risk Findings</h3>
-                <div class="number">0</div>
-                <p>Require investigation</p>
+
+                <h3>
+                    Assessments
+                </h3>
+
+                <div class="number">
+                    0
+                </div>
+
+                <p>
+                    Completed assessments
+                </p>
+
             </article>
 
+
             <article class="card">
-                <h3>MCP Server</h3>
+
+                <h3>
+                    High Risk Findings
+                </h3>
+
+                <div class="number">
+                    0
+                </div>
+
+                <p>
+                    Require investigation
+                </p>
+
+            </article>
+
+
+            <article class="card">
+
+                <h3>
+                    MCP Server
+                </h3>
+
                 <div class="service-state">
                     Coming Soon
                 </div>
-                <p>External tool access</p>
+
+                <p>
+                    External tool access
+                </p>
+
             </article>
 
         </section>
 
+
         {% if user %}
+
+
+        <!-- ================================================= -->
+        <!-- VENDORS -->
+        <!-- ================================================= -->
 
         <section class="vendor-section">
 
             <div class="section-header">
+
                 <div>
-                    <h2>Vendors</h2>
+
+                    <h2>
+                        Vendors
+                    </h2>
+
                     <p>
-                        Vendors currently registered for risk assessment.
+                        Vendors currently registered
+                        for risk assessment.
                     </p>
+
                 </div>
+
             </div>
+
 
             {% if "admin" in user.roles or "analyst" in user.roles %}
 
             <div class="vendor-form-card">
 
-                <h3>Add Vendor</h3>
+                <h3>
+                    Add Vendor
+                </h3>
 
                 <form
                     id="vendor-form"
@@ -118,6 +224,7 @@
                         required
                     >
 
+
                     <label for="vendor-website">
                         Website
                     </label>
@@ -130,9 +237,11 @@
                         placeholder="https://example.com"
                     >
 
+
                     <button type="submit">
                         Create Vendor
                     </button>
+
 
                     <p id="vendor-message"></p>
 
@@ -142,9 +251,12 @@
 
             {% endif %}
 
+
             <div class="vendor-list-card">
 
-                <h3>Registered Vendors</h3>
+                <h3>
+                    Registered Vendors
+                </h3>
 
                 <div id="vendor-list">
                     Loading vendors...
@@ -153,16 +265,26 @@
             </div>
 
         </section>
-        ----
+
+
+        <!-- ================================================= -->
+        <!-- DOCUMENTS -->
+        <!-- ================================================= -->
+
         <section class="document-section">
 
-            <h2>Vendor Documents</h2>
+            <h2>
+                Vendor Documents
+            </h2>
+
 
             {% if "admin" in user.roles or "analyst" in user.roles %}
 
             <div class="document-upload-card">
 
-                <h3>Upload Document</h3>
+                <h3>
+                    Upload Document
+                </h3>
 
                 <form
                     id="document-upload-form"
@@ -177,10 +299,13 @@
                         id="document-vendor"
                         required
                     >
+
                         <option value="">
                             Select vendor
                         </option>
+
                     </select>
+
 
                     <label for="document-file">
                         Document
@@ -193,9 +318,11 @@
                         required
                     >
 
+
                     <button type="submit">
                         Upload Document
                     </button>
+
 
                     <p id="document-upload-message"></p>
 
@@ -205,43 +332,157 @@
 
             {% endif %}
 
+
             <div class="document-list-card">
-                <h3>Documents</h3>
+
+                <h3>
+                    Documents
+                </h3>
 
                 <div id="document-list">
                     Select a vendor to view documents.
                 </div>
+
             </div>
 
         </section>
+
+
+        <!-- ================================================= -->
+        <!-- VENDOR RISK ASSESSMENT -->
+        <!-- ================================================= -->
+
+        {% if "admin" in user.roles or "analyst" in user.roles %}
+
+        <section class="assessment-section">
+
+            <div class="section-header">
+
+                <div>
+
+                    <h2>
+                        Vendor Risk Assessment
+                    </h2>
+
+                    <p>
+                        Select a vendor above and run
+                        a grounded AI risk assessment
+                        against its ready documents.
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <div class="assessment-card">
+
+                <h3>
+                    Run Assessment
+                </h3>
+
+                <p>
+                    The assessment will retrieve
+                    vendor-scoped evidence, analyze
+                    grounded risks, persist findings,
+                    and apply deterministic risk policy.
+                </p>
+
+
+                <button
+                    id="run-assessment-button"
+                    type="button"
+                    data-csrf-token="{{ csrf_token or '' }}"
+                >
+                    Run Assessment
+                </button>
+
+
+                <p id="assessment-message"></p>
+
+
+                <div id="assessment-result">
+                </div>
+
+            </div>
+
+        </section>
+
         {% endif %}
 
+
+        {% endif %}
+
+
+        <!-- ================================================= -->
+        <!-- SYSTEM STATUS -->
+        <!-- ================================================= -->
+
         <section class="system">
-            <h2>System Status</h2>
+
+            <h2>
+                System Status
+            </h2>
+
 
             <div class="system-row">
-                <span>API</span>
-                <strong>Online</strong>
+
+                <span>
+                    API
+                </span>
+
+                <strong>
+                    Online
+                </strong>
+
             </div>
 
-            <div class="system-row">
-                <span>Database</span>
-                <strong>Not Connected</strong>
-            </div>
 
             <div class="system-row">
-                <span>Vector Search</span>
-                <strong>Not Configured</strong>
+
+                <span>
+                    Database
+                </span>
+
+                <strong>
+                    Not Connected
+                </strong>
+
             </div>
 
+
             <div class="system-row">
-                <span>LLM Provider</span>
-                <strong>Not Configured</strong>
+
+                <span>
+                    Vector Search
+                </span>
+
+                <strong>
+                    Not Configured
+                </strong>
+
+            </div>
+
+
+            <div class="system-row">
+
+                <span>
+                    LLM Provider
+                </span>
+
+                <strong>
+                    Not Configured
+                </strong>
+
             </div>
 
         </section>
 
     </main>
-<script src="/static/app.js?v=2"></script>
+
+
+    <script src="/static/app.js?v=3"></script>
+
 </body>
+
 </html>

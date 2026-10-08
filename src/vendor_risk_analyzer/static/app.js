@@ -36,6 +36,17 @@ const documentList =
     document.getElementById("document-list");
 
 
+// Assessment elements
+const runAssessmentButton =
+    document.getElementById("run-assessment-button");
+
+const assessmentMessage =
+    document.getElementById("assessment-message");
+
+const assessmentResult =
+    document.getElementById("assessment-result");
+
+
 // ------------------------------------------------------------
 // SECURITY / DISPLAY HELPERS
 // ------------------------------------------------------------
@@ -674,7 +685,7 @@ async function loadDocuments(vendorId) {
 
 
 // ------------------------------------------------------------
-// Ingest Document
+// INGEST DOCUMENT
 // ------------------------------------------------------------
 
 async function ingestDocument(
@@ -790,12 +801,289 @@ if (documentVendor) {
                 documentList.textContent =
                     "Select a vendor to view documents.";
 
+                if (assessmentMessage) {
+                    assessmentMessage.textContent =
+                        "";
+                }
+
+                if (assessmentResult) {
+                    assessmentResult.innerHTML =
+                        "";
+                }
+
                 return;
             }
 
             await loadDocuments(
                 vendorId
             );
+
+            if (assessmentMessage) {
+                assessmentMessage.textContent =
+                    "";
+            }
+
+            if (assessmentResult) {
+                assessmentResult.innerHTML =
+                    "";
+            }
+        }
+    );
+}
+
+
+// ------------------------------------------------------------
+// RUN VENDOR ASSESSMENT
+// ------------------------------------------------------------
+
+if (runAssessmentButton) {
+    runAssessmentButton.addEventListener(
+        "click",
+        async () => {
+            const vendorId =
+                documentVendor?.value;
+
+            if (!vendorId) {
+                if (assessmentMessage) {
+                    assessmentMessage.textContent =
+                        "Please select a vendor first.";
+                }
+
+                return;
+            }
+
+            const csrfToken =
+                runAssessmentButton.dataset.csrfToken;
+
+            if (!csrfToken) {
+                if (assessmentMessage) {
+                    assessmentMessage.textContent =
+                        "Security token is missing. Please refresh the page.";
+                }
+
+                return;
+            }
+
+            const originalText =
+                runAssessmentButton.textContent;
+
+            runAssessmentButton.disabled =
+                true;
+
+            runAssessmentButton.textContent =
+                "Running assessment...";
+
+            if (assessmentMessage) {
+                assessmentMessage.textContent =
+                    "Analyzing vendor documents. This may take a little while.";
+            }
+
+            if (assessmentResult) {
+                assessmentResult.innerHTML =
+                    "";
+            }
+
+            try {
+                const response =
+                    await fetch(
+                        `/api/vendors/${vendorId}/assessments`,
+                        {
+                            method: "POST",
+
+                            credentials:
+                                "same-origin",
+
+                            headers: {
+                                "X-CSRF-Token":
+                                    csrfToken,
+                            },
+                        }
+                    );
+
+                let body = {};
+
+                try {
+                    body =
+                        await response.json();
+                } catch {
+                    body = {};
+                }
+
+                if (!response.ok) {
+                    throw new Error(
+                        body.detail ||
+                        `Assessment failed with status ${response.status}`
+                    );
+                }
+
+                if (assessmentMessage) {
+                    assessmentMessage.textContent =
+                        "Assessment completed successfully.";
+                }
+
+                const findings =
+                    body.findings || [];
+
+                let findingsHtml =
+                    "";
+
+                for (const finding of findings) {
+                    findingsHtml += `
+                        <div class="assessment-finding">
+
+                            <h4>
+                                ${escapeHtml(
+                                    finding.title
+                                )}
+                            </h4>
+
+                            <p>
+                                <strong>
+                                    Category:
+                                </strong>
+
+                                ${escapeHtml(
+                                    finding.category
+                                )}
+                            </p>
+
+                            <p>
+                                <strong>
+                                    Severity:
+                                </strong>
+
+                                ${escapeHtml(
+                                    finding.severity
+                                )}
+                            </p>
+
+                            <p>
+                                <strong>
+                                    Rule:
+                                </strong>
+
+                                ${escapeHtml(
+                                    finding.rule_id ||
+                                    "None"
+                                )}
+                            </p>
+
+                            <p>
+                                <strong>
+                                    Confidence:
+                                </strong>
+
+                                ${escapeHtml(
+                                    finding.confidence ??
+                                    "Unknown"
+                                )}
+                            </p>
+
+                            <p>
+                                ${escapeHtml(
+                                    finding.description
+                                )}
+                            </p>
+
+                        </div>
+                    `;
+                }
+
+                if (assessmentResult) {
+                    assessmentResult.innerHTML = `
+                        <div class="assessment-summary">
+
+                            <h3>
+                                Assessment Result
+                            </h3>
+
+                            <p>
+                                <strong>
+                                    Assessment ID:
+                                </strong>
+
+                                ${escapeHtml(
+                                    body.id
+                                )}
+                            </p>
+
+                            <p>
+                                <strong>
+                                    Status:
+                                </strong>
+
+                                ${escapeHtml(
+                                    body.status
+                                )}
+                            </p>
+
+                            <p>
+                                <strong>
+                                    Assessment Type:
+                                </strong>
+
+                                ${escapeHtml(
+                                    body.assessment_type
+                                )}
+                            </p>
+
+                            <p>
+                                <strong>
+                                    Overall Risk:
+                                </strong>
+
+                                ${escapeHtml(
+                                    body.overall_risk ||
+                                    "Unrated"
+                                )}
+                            </p>
+
+                            <p>
+                                <strong>
+                                    Overall Score:
+                                </strong>
+
+                                ${escapeHtml(
+                                    body.overall_score ??
+                                    "Not calculated"
+                                )}
+                            </p>
+
+                            <p>
+                                <strong>
+                                    Findings:
+                                </strong>
+
+                                ${findings.length}
+                            </p>
+
+                        </div>
+
+
+                        <div class="assessment-findings">
+                            ${findingsHtml}
+                        </div>
+                    `;
+                }
+
+            } catch (error) {
+                console.error(
+                    "Assessment failed:",
+                    error
+                );
+
+                if (assessmentMessage) {
+                    assessmentMessage.textContent =
+                        error.message;
+                }
+
+            } finally {
+                runAssessmentButton.disabled =
+                    false;
+
+                runAssessmentButton.textContent =
+                    originalText;
+            }
         }
     );
 }
