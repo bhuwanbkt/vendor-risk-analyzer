@@ -1,0 +1,67 @@
+<aside
+    id="app-sidebar"
+    class="sidebar"
+>
+
+    <div class="brand">
+
+        <div class="brand-mark">
+            VR
+        </div>
+
+        <div>
+            <strong>
+                Vendor Risk
+            </strong>
+
+            <span>
+                Analyzer
+            </span>
+        </div>
+
+    </div>
+
+
+    <nav class="sidebar-nav">
+
+        {% for item in navigation %}
+
+            <a
+                href="{{ item.href }}"
+                class="
+                    nav-link
+                    {% if active_page == item.key %}
+                        active
+                    {% endif %}
+                "
+            >
+
+                <span class="nav-icon">
+                    {{ item.icon }}
+                </span>
+
+                <span>
+                    {{ item.label }}
+                </span>
+
+            </a>
+
+        {% endfor %}
+
+    </nav>
+
+
+    <div class="sidebar-footer">
+
+        <div class="secure-label">
+
+            <span class="secure-dot">
+            </span>
+
+            Secure session
+
+        </div>
+
+    </div>
+
+</aside>

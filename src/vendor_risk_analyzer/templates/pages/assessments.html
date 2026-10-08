@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+
+
+{% block content %}
+
+<section class="page-heading">
+
+    <div>
+
+        <span class="eyebrow">
+            Risk intelligence
+        </span>
+
+        <h2>
+            Assessments
+        </h2>
+
+        <p>
+            Run grounded vendor risk reviews
+            and inspect previous results.
+        </p>
+
+    </div>
+
+</section>
+
+
+{% if can_manage %}
+
+<section
+    class="content-card assessment-runner"
+    data-csrf-token="{{ csrf_token }}"
+>
+
+    <div class="card-heading">
+
+        <div>
+
+            <h3>
+                New Assessment
+            </h3>
+
+            <p>
+                Select a vendor with
+                ready documents.
+            </p>
+
+        </div>
+
+    </div>
+
+
+    <div class="assessment-run-grid">
+
+        <select id="assessment-vendor">
+
+            <option value="">
+                Select vendor
+            </option>
+
+            {% for vendor in vendors %}
+
+                <option
+                    value="{{ vendor.id }}"
+                >
+                    {{ vendor.name }}
+                </option>
+
+            {% endfor %}
+
+        </select>
+
+
+        <div
+            id="assessment-readiness"
+            class="readiness neutral"
+        >
+            Select a vendor.
+        </div>
+
+
+        <button
+            id="run-assessment-button"
+            class="primary-button"
+            type="button"
+            disabled
+        >
+            Run Assessment
+        </button>
+
+    </div>
+
+
+    <p
+        id="assessment-message"
+        class="form-message"
+    ></p>
+
+</section>
+
+{% endif %}
+
+
+<section class="content-card">
+
+    <div class="card-heading">
+
+        <div>
+
+            <h3>
+                Assessment History
+            </h3>
+
+            <p>
+                {{ assessments|length }}
+                recent assessments
+            </p>
+
+        </div>
+
+    </div>
+
+
+    <div class="table-wrap">
+
+        <table class="data-table">
+
+            <thead>
+
+                <tr>
+                    <th>Vendor</th>
+                    <th>Risk</th>
+                    <th>Findings</th>
+                    <th>Status</th>
+                    <th>Completed</th>
+                    <th></th>
+                </tr>
+
+            </thead>
+
+
+            <tbody>
+
+                {% for item in assessments %}
+
+                <tr>
+
+                    <td>
+
+                        <strong>
+                            {{ item.vendor_name }}
+                        </strong>
+
+                    </td>
+
+
+                    <td>
+
+                        <span
+                            class="
+                                risk-badge
+                                risk-{{
+                                    item.assessment.overall_risk
+                                    or 'unrated'
+                                }}
+                            "
+                        >
+                            {{
+                                item.assessment.overall_risk
+                                or "unrated"
+                            }}
+                        </span>
+
+                    </td>
+
+
+                    <td>
+                        {{ item.finding_count }}
+                    </td>
+
+
+                    <td>
+                        {{ item.assessment.status }}
+                    </td>
+
+
+                    <td>
+
+                        {% if item.assessment.completed_at %}
+
+                            {{
+                                item.assessment.completed_at.strftime(
+                                    "%b %d, %Y"
+                                )
+                            }}
+
+                        {% else %}
+
+                            —
+
+                        {% endif %}
+
+                    </td>
+
+
+                    <td>
+
+                        <a
+                            href="/assessments/{{ item.assessment.id }}"
+                            class="row-link"
+                        >
+                            View report →
+                        </a>
+
+                    </td>
+
+                </tr>
+
+                {% else %}
+
+                <tr>
+
+                    <td
+                        colspan="6"
+                        class="empty-cell"
+                    >
+                        No assessments yet.
+                    </td>
+
+                </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</section>
+
+{% endblock %}
+
+
+{% block scripts %}
+
+{% if can_manage %}
+<script src="/static/js/assessments.js?v=1"></script>
+{% endif %}
+
+{% endblock %}

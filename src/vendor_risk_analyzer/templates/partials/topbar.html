@@ -1,0 +1,107 @@
+<header class="topbar">
+
+    <div class="topbar-left">
+
+        <button
+            id="mobile-menu-button"
+            class="icon-button mobile-menu"
+            type="button"
+            aria-label="Open navigation"
+        >
+            ☰
+        </button>
+
+
+        <div>
+
+            <h1>
+                {{ page_title }}
+            </h1>
+
+            <p>
+                Vendor security intelligence
+            </p>
+
+        </div>
+
+    </div>
+
+
+    <div class="profile-menu-wrap">
+
+        <button
+            id="profile-menu-button"
+            class="profile-button"
+            type="button"
+        >
+
+            <span class="avatar">
+                {{ initials }}
+            </span>
+
+
+            <span class="profile-button-text">
+
+                <strong>
+                    {{ display_name }}
+                </strong>
+
+                <small>
+                    {% if "admin" in roles %}
+                        Administrator
+                    {% elif "analyst" in roles %}
+                        Analyst
+                    {% else %}
+                        Viewer
+                    {% endif %}
+                </small>
+
+            </span>
+
+            <span>
+                ▾
+            </span>
+
+        </button>
+
+
+        <div
+            id="profile-menu"
+            class="profile-menu"
+            hidden
+        >
+
+            <div class="profile-menu-header">
+
+                <strong>
+                    {{ display_name }}
+                </strong>
+
+                <span>
+                    {{
+                        user.email
+                        or user.preferred_username
+                        or ""
+                    }}
+                </span>
+
+            </div>
+
+
+            <a href="/profile">
+                My Profile
+            </a>
+
+
+            <a
+                href="/auth/logout"
+                class="logout-link"
+            >
+                Sign out
+            </a>
+
+        </div>
+
+    </div>
+
+</header>

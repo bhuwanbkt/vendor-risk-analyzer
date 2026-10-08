@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+
+
+{% block content %}
+
+<section class="page-heading">
+
+    <div>
+
+        <span class="eyebrow">
+            Overview
+        </span>
+
+        <h2>
+            Vendor risk at a glance
+        </h2>
+
+        <p>
+            Review vendors, completed assessments,
+            and evidence-backed findings.
+        </p>
+
+    </div>
+
+</section>
+
+
+<section class="metric-grid">
+
+    <article class="metric-card">
+
+        <span>
+            Vendors
+        </span>
+
+        <strong>
+            {{ vendor_count }}
+        </strong>
+
+        <small>
+            Registered vendors
+        </small>
+
+    </article>
+
+
+    <article class="metric-card">
+
+        <span>
+            Assessments
+        </span>
+
+        <strong>
+            {{ assessment_count }}
+        </strong>
+
+        <small>
+            Completed reviews
+        </small>
+
+    </article>
+
+
+    <article class="metric-card">
+
+        <span>
+            Open Findings
+        </span>
+
+        <strong>
+            {{ finding_count }}
+        </strong>
+
+        <small>
+            Require review
+        </small>
+
+    </article>
+
+
+    <article class="metric-card accent-card">
+
+        <span>
+            AI Retrieval
+        </span>
+
+        <strong>
+            Ready
+        </strong>
+
+        <small>
+            pgvector grounded
+        </small>
+
+    </article>
+
+</section>
+
+
+<section class="content-card">
+
+    <div class="card-heading">
+
+        <div>
+            <h3>
+                Recent Assessments
+            </h3>
+
+            <p>
+                Latest vendor risk reviews.
+            </p>
+        </div>
+
+
+        <a
+            href="/assessments"
+            class="text-link"
+        >
+            View all →
+        </a>
+
+    </div>
+
+
+    {% if recent_assessments %}
+
+        <div class="table-wrap">
+
+            <table class="data-table">
+
+                <thead>
+
+                    <tr>
+                        <th>Vendor</th>
+                        <th>Risk</th>
+                        <th>Status</th>
+                        <th>Date</th>
+                        <th></th>
+                    </tr>
+
+                </thead>
+
+
+                <tbody>
+
+                    {% for item in recent_assessments %}
+
+                    <tr>
+
+                        <td>
+                            <strong>
+                                {{ item.vendor_name }}
+                            </strong>
+                        </td>
+
+                        <td>
+
+                            <span
+                                class="
+                                    risk-badge
+                                    risk-{{ item.assessment.overall_risk or 'unrated' }}
+                                "
+                            >
+                                {{
+                                    item.assessment.overall_risk
+                                    or "unrated"
+                                }}
+                            </span>
+
+                        </td>
+
+                        <td>
+                            {{ item.assessment.status }}
+                        </td>
+
+                        <td>
+                            {{
+                                item.assessment.created_at.strftime(
+                                    "%b %d, %Y"
+                                )
+                            }}
+                        </td>
+
+                        <td>
+
+                            <a
+                                href="/assessments/{{ item.assessment.id }}"
+                                class="row-link"
+                            >
+                                View →
+                            </a>
+
+                        </td>
+
+                    </tr>
+
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    {% else %}
+
+        <div class="empty-state">
+            No assessments yet.
+        </div>
+
+    {% endif %}
+
+</section>
+
+{% endblock %}

@@ -1,0 +1,407 @@
+{% extends "base.html" %}
+
+
+{% block content %}
+
+<a
+    href="/assessments"
+    class="back-link"
+>
+    ← Assessments
+</a>
+
+
+<section
+    class="
+        assessment-hero
+        risk-border-{{
+            assessment.overall_risk
+            or 'unrated'
+        }}
+    "
+>
+
+    <div>
+
+        <span class="eyebrow">
+            Vendor Risk Assessment
+        </span>
+
+        <h2>
+            {{ vendor.name if vendor else "Vendor" }}
+        </h2>
+
+        <p>
+            {{
+                assessment.extra_data.get(
+                    "analysis_summary",
+                    "Evidence-backed vendor risk assessment."
+                )
+            }}
+        </p>
+
+    </div>
+
+
+    <div
+        class="
+            risk-verdict
+            risk-{{
+                assessment.overall_risk
+                or 'unrated'
+            }}
+        "
+    >
+
+        <small>
+            Overall Risk
+        </small>
+
+        <strong>
+            {{
+                assessment.overall_risk
+                or "unrated"
+            }}
+        </strong>
+
+    </div>
+
+</section>
+
+
+<section class="report-stat-grid">
+
+    <div class="report-stat">
+
+        <span>
+            Findings
+        </span>
+
+        <strong>
+            {{ findings|length }}
+        </strong>
+
+    </div>
+
+
+    <div class="report-stat">
+
+        <span>
+            Status
+        </span>
+
+        <strong>
+            {{ assessment.status }}
+        </strong>
+
+    </div>
+
+
+    <div class="report-stat">
+
+        <span>
+            Policy
+        </span>
+
+        <strong>
+            {{
+                assessment.extra_data.get(
+                    "risk_policy_version",
+                    "Not applied"
+                )
+            }}
+        </strong>
+
+    </div>
+
+
+    <div class="report-stat">
+
+        <span>
+            Score
+        </span>
+
+        <strong>
+            {{
+                assessment.overall_score
+                if assessment.overall_score is not none
+                else "Not calculated"
+            }}
+        </strong>
+
+    </div>
+
+</section>
+
+
+<section class="report-section">
+
+    <div class="section-title">
+
+        <span class="eyebrow">
+            Evidence-backed findings
+        </span>
+
+        <h2>
+            What needs attention
+        </h2>
+
+    </div>
+
+
+    <div class="finding-list">
+
+        {% for finding in findings %}
+
+        <article
+            class="
+                report-finding
+                finding-{{
+                    finding.severity
+                    or 'unrated'
+                }}
+            "
+        >
+
+            <div class="finding-accent">
+            </div>
+
+
+            <div class="finding-content">
+
+                <div class="finding-header">
+
+                    <div>
+
+                        <span class="finding-category">
+                            {{
+                                finding.category
+                                | replace("_", " ")
+                                | title
+                            }}
+                        </span>
+
+                        <h3>
+                            {{ finding.title }}
+                        </h3>
+
+                    </div>
+
+
+                    <span
+                        class="
+                            risk-badge
+                            risk-{{
+                                finding.severity
+                                or 'unrated'
+                            }}
+                        "
+                    >
+                        {{
+                            finding.severity
+                            or "unrated"
+                        }}
+                    </span>
+
+                </div>
+
+
+                <p class="finding-description">
+                    {{ finding.description }}
+                </p>
+
+
+                <div class="finding-meta">
+
+                    <div>
+
+                        <span>
+                            Signal
+                        </span>
+
+                        <strong>
+                            {{
+                                finding.extra_data.get(
+                                    "finding_type",
+                                    "other"
+                                )
+                                | replace("_", " ")
+                                | title
+                            }}
+                        </strong>
+
+                    </div>
+
+
+                    <div>
+
+                        <span>
+                            Rule
+                        </span>
+
+                        <strong>
+                            {{
+                                finding.rule_id
+                                or "Unrated"
+                            }}
+                        </strong>
+
+                    </div>
+
+
+                    <div>
+
+                        <span>
+                            Confidence
+                        </span>
+
+                        <strong>
+                            {% if finding.confidence is not none %}
+                                {{
+                                    (
+                                        finding.confidence
+                                        * 100
+                                    )
+                                    | round
+                                    | int
+                                }}%
+                            {% else %}
+                                —
+                            {% endif %}
+                        </strong>
+
+                    </div>
+
+                </div>
+
+
+                {% set evidence = finding.extra_data.get("evidence", []) %}
+
+                <details class="evidence-details">
+
+                    <summary>
+
+                        Supporting evidence
+
+                        <span>
+                            {{ evidence|length }}
+                            source(s)
+                        </span>
+
+                    </summary>
+
+
+                    <div class="evidence-list">
+
+                        {% for source in evidence %}
+
+                        <div class="evidence-row">
+
+                            <div>
+
+                                <strong>
+                                    Document
+                                    {{
+                                        source.get(
+                                            "document_id",
+                                            ""
+                                        )[:8]
+                                    }}
+                                </strong>
+
+                                <span>
+                                    Chunk
+                                    {{
+                                        source.get(
+                                            "chunk_id",
+                                            ""
+                                        )[:8]
+                                    }}
+                                </span>
+
+                            </div>
+
+
+                            <strong>
+                                {{
+                                    (
+                                        source.get(
+                                            "similarity",
+                                            0
+                                        )
+                                        * 100
+                                    )
+                                    | round
+                                    | int
+                                }}%
+                            </strong>
+
+                        </div>
+
+                        {% else %}
+
+                        <div class="empty-state">
+                            No evidence metadata available.
+                        </div>
+
+                        {% endfor %}
+
+                    </div>
+
+                </details>
+
+            </div>
+
+        </article>
+
+        {% else %}
+
+        <div class="empty-state">
+            No findings were generated.
+        </div>
+
+        {% endfor %}
+
+    </div>
+
+</section>
+
+
+<details class="technical-panel">
+
+    <summary>
+        Technical assessment details
+    </summary>
+
+    <div class="technical-grid">
+
+        <div>
+
+            <span>
+                Assessment ID
+            </span>
+
+            <strong>
+                {{ assessment.id }}
+            </strong>
+
+        </div>
+
+
+        <div>
+
+            <span>
+                Assessment type
+            </span>
+
+            <strong>
+                {{ assessment.assessment_type }}
+            </strong>
+
+        </div>
+
+    </div>
+
+</details>
+
+{% endblock %}

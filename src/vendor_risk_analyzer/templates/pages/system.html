@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+
+
+{% block content %}
+
+<section class="page-heading">
+
+    <div>
+
+        <span class="eyebrow">
+            Administrator
+        </span>
+
+        <h2>
+            System
+        </h2>
+
+        <p>
+            Runtime configuration and
+            service status.
+        </p>
+
+    </div>
+
+</section>
+
+
+<section class="system-grid">
+
+    <article class="system-card">
+
+        <span class="status-dot green">
+        </span>
+
+        <div>
+
+            <strong>
+                FastAPI
+            </strong>
+
+            <p>
+                Online
+            </p>
+
+        </div>
+
+    </article>
+
+
+    <article class="system-card">
+
+        <span class="status-dot green">
+        </span>
+
+        <div>
+
+            <strong>
+                PostgreSQL
+            </strong>
+
+            <p>
+                Connected
+            </p>
+
+        </div>
+
+    </article>
+
+
+    <article class="system-card">
+
+        <span class="status-dot green">
+        </span>
+
+        <div>
+
+            <strong>
+                pgvector
+            </strong>
+
+            <p>
+                Ready
+            </p>
+
+        </div>
+
+    </article>
+
+
+    <article class="system-card">
+
+        <span class="status-dot green">
+        </span>
+
+        <div>
+
+            <strong>
+                Gemini
+            </strong>
+
+            <p>
+                Configured
+            </p>
+
+        </div>
+
+    </article>
+
+</section>
+
+
+<section class="content-card">
+
+    <div class="card-heading">
+
+        <div>
+
+            <h3>
+                Model Configuration
+            </h3>
+
+            <p>
+                Secret values are never displayed.
+            </p>
+
+        </div>
+
+    </div>
+
+
+    <div class="configuration-grid">
+
+        <div>
+
+            <span>
+                Embedding Model
+            </span>
+
+            <strong>
+                {{
+                    system_info.embedding_model
+                }}
+            </strong>
+
+        </div>
+
+
+        <div>
+
+            <span>
+                Embedding Dimensions
+            </span>
+
+            <strong>
+                {{
+                    system_info.embedding_dimensions
+                }}
+            </strong>
+
+        </div>
+
+
+        <div>
+
+            <span>
+                Risk Analysis Model
+            </span>
+
+            <strong>
+                {{
+                    system_info.risk_model
+                }}
+            </strong>
+
+        </div>
+
+
+        <div>
+
+            <span>
+                Chat Model
+            </span>
+
+            <strong>
+                {{
+                    system_info.chat_model
+                }}
+            </strong>
+
+        </div>
+
+    </div>
+
+</section>
+
+{% endblock %}

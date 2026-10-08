@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <meta
+        name="csrf-token"
+        content="{{ csrf_token }}"
+    >
+
+    <title>
+        {{ page_title }} · Vendor Risk Analyzer
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="/static/css/app.css?v=1"
+    >
+
+    {% block styles %}
+    {% endblock %}
+
+</head>
+
+
+<body>
+
+    <div class="app-shell">
+
+        {% include "partials/sidebar.html" %}
+
+
+        <div class="app-main">
+
+            {% include "partials/topbar.html" %}
+
+
+            <main class="page-content">
+
+                {% block content %}
+                {% endblock %}
+
+            </main>
+
+        </div>
+
+    </div>
+
+
+    <div
+        id="sidebar-overlay"
+        class="sidebar-overlay"
+    >
+    </div>
+
+
+    <script src="/static/js/common.js?v=1"></script>
+
+    {% block scripts %}
+    {% endblock %}
+
+</body>
+
+</html>

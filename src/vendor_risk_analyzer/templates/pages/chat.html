@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+
+
+{% block content %}
+
+<section class="page-heading">
+
+    <div>
+
+        <span class="eyebrow">
+            Grounded RAG
+        </span>
+
+        <h2>
+            AI Risk Assistant
+        </h2>
+
+        <p>
+            Ask questions about one vendor's
+            ready documents at a time.
+        </p>
+
+    </div>
+
+</section>
+
+
+<section
+    id="chat-app"
+    class="chat-layout"
+    data-csrf-token="{{ csrf_token }}"
+>
+
+    <aside class="chat-context">
+
+        <h3>
+            Vendor Context
+        </h3>
+
+
+        <label>
+            Vendor
+
+            <select id="chat-vendor">
+
+                <option value="">
+                    Select vendor
+                </option>
+
+                {% for vendor in vendors %}
+
+                    <option
+                        value="{{ vendor.id }}"
+                    >
+                        {{ vendor.name }}
+                    </option>
+
+                {% endfor %}
+
+            </select>
+
+        </label>
+
+
+        <div class="chat-security-note">
+
+            <strong>
+                Vendor scoped
+            </strong>
+
+            <p>
+                Answers use only ready
+                documents belonging to the
+                selected vendor.
+            </p>
+
+        </div>
+
+
+        <div class="suggestion-list">
+
+            <button
+                type="button"
+                class="chat-suggestion"
+            >
+                What incident notification
+                timeline is documented?
+            </button>
+
+
+            <button
+                type="button"
+                class="chat-suggestion"
+            >
+                What business continuity
+                risks are documented?
+            </button>
+
+
+            <button
+                type="button"
+                class="chat-suggestion"
+            >
+                Are there conflicting
+                requirements?
+            </button>
+
+        </div>
+
+    </aside>
+
+
+    <section class="chat-panel">
+
+        <div
+            id="chat-messages"
+            class="chat-messages"
+        >
+
+            <div class="assistant-message">
+
+                <div class="message-avatar">
+                    AI
+                </div>
+
+                <div class="message-bubble">
+
+                    <strong>
+                        Vendor Risk Assistant
+                    </strong>
+
+                    <p>
+                        Select a vendor and ask
+                        a question about its
+                        security, privacy,
+                        compliance, incident
+                        response, or business
+                        continuity evidence.
+                    </p>
+
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <form
+            id="chat-form"
+            class="chat-composer"
+        >
+
+            <textarea
+                id="chat-question"
+                maxlength="2000"
+                rows="2"
+                placeholder="Ask about this vendor..."
+                required
+            ></textarea>
+
+
+            <button
+                id="chat-send"
+                type="submit"
+                class="primary-button"
+            >
+                Send
+            </button>
+
+        </form>
+
+
+        <p
+            id="chat-message"
+            class="form-message"
+        ></p>
+
+    </section>
+
+</section>
+
+{% endblock %}
+
+
+{% block scripts %}
+<script src="/static/js/chat.js?v=1"></script>
+{% endblock %}

@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+
+
+{% block content %}
+
+<section class="page-heading">
+
+    <div>
+
+        <span class="eyebrow">
+            Knowledge base
+        </span>
+
+        <h2>
+            Documents
+        </h2>
+
+        <p>
+            Upload, process, and review
+            vendor evidence.
+        </p>
+
+    </div>
+
+</section>
+
+
+<div
+    id="documents-page"
+    data-can-manage="{{ 'true' if can_manage else 'false' }}"
+>
+
+
+    {% if can_manage %}
+
+    <section class="content-card">
+
+        <div class="card-heading">
+
+            <div>
+
+                <h3>
+                    Upload Document
+                </h3>
+
+                <p>
+                    Files upload directly to
+                    private object storage.
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <form
+            id="document-upload-form"
+            class="document-upload-grid"
+            data-csrf-token="{{ csrf_token }}"
+        >
+
+            <label>
+                Vendor
+
+                <select
+                    id="upload-vendor"
+                    required
+                >
+
+                    <option value="">
+                        Select vendor
+                    </option>
+
+                    {% for vendor in vendors %}
+
+                        <option
+                            value="{{ vendor.id }}"
+                        >
+                            {{ vendor.name }}
+                        </option>
+
+                    {% endfor %}
+
+                </select>
+
+            </label>
+
+
+            <label>
+                Document
+
+                <input
+                    id="document-file"
+                    type="file"
+                    accept=".pdf,.docx,.xlsx,.csv,.txt,.md"
+                    required
+                >
+
+            </label>
+
+
+            <button
+                type="submit"
+                class="primary-button"
+            >
+                Upload
+            </button>
+
+        </form>
+
+
+        <p
+            id="document-upload-message"
+            class="form-message"
+        ></p>
+
+    </section>
+
+    {% endif %}
+
+
+    <section class="content-card">
+
+        <div class="card-heading">
+
+            <div>
+
+                <h3>
+                    Document Library
+                </h3>
+
+                <p>
+                    Browse documents independently
+                    from the upload vendor.
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <div class="library-toolbar">
+
+            <select id="document-library-vendor">
+
+                <option value="">
+                    Select vendor
+                </option>
+
+                {% for vendor in vendors %}
+
+                    <option
+                        value="{{ vendor.id }}"
+                    >
+                        {{ vendor.name }}
+                    </option>
+
+                {% endfor %}
+
+            </select>
+
+
+            <span
+                id="document-count"
+                class="count-badge"
+            >
+                0 documents
+            </span>
+
+        </div>
+
+
+        <div
+            id="document-list"
+            class="document-list"
+        >
+
+            <div class="empty-state">
+                Select a vendor to view documents.
+            </div>
+
+        </div>
+
+    </section>
+
+</div>
+
+{% endblock %}
+
+
+{% block scripts %}
+<script src="/static/js/documents.js?v=1"></script>
+{% endblock %}

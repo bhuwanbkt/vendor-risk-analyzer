@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+
+{% block content %}
+
+<section class="page-heading">
+
+    <div>
+
+        <span class="eyebrow">
+            Account
+        </span>
+
+        <h2>
+            My Profile
+        </h2>
+
+        <p>
+            Identity information from
+            your authenticated session.
+        </p>
+
+    </div>
+
+</section>
+
+
+<section class="profile-card">
+
+    <div class="profile-avatar-large">
+        {{ initials }}
+    </div>
+
+
+    <div class="profile-identity">
+
+        <h2>
+            {{ display_name }}
+        </h2>
+
+        <p>
+            {{
+                user.email
+                or user.preferred_username
+                or ""
+            }}
+        </p>
+
+
+        <div class="role-row">
+
+            {% for role in roles %}
+
+                <span class="role-pill">
+                    {{ role }}
+                </span>
+
+            {% endfor %}
+
+        </div>
+
+    </div>
+
+
+    <div class="profile-details">
+
+        <div>
+
+            <span>
+                Identity Provider
+            </span>
+
+            <strong>
+                ZITADEL
+            </strong>
+
+        </div>
+
+
+        <div>
+
+            <span>
+                User ID
+            </span>
+
+            <strong>
+                {{
+                    user.sub
+                    or "Unavailable"
+                }}
+            </strong>
+
+        </div>
+
+
+        <div>
+
+            <span>
+                Authentication
+            </span>
+
+            <strong class="success-text">
+                Active session
+            </strong>
+
+        </div>
+
+    </div>
+
+</section>
+
+{% endblock %}

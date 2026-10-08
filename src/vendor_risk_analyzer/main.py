@@ -1,211 +1,348 @@
+from __future__ import annotations
+
 import asyncio
-import os
-import secrets
+
 from contextlib import (
     asynccontextmanager,
     suppress,
 )
+
 from pathlib import Path
 
 from fastapi import (
     FastAPI,
-    Request,
 )
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import (
-    Jinja2Templates,
+
+from fastapi.staticfiles import (
+    StaticFiles,
 )
+
 from starlette.middleware.sessions import (
     SessionMiddleware,
+)
+
+
+# ============================================================
+# API ROUTERS
+# ============================================================
+
+from vendor_risk_analyzer.api.health import (
+    router as health_router,
+)
+
+from vendor_risk_analyzer.api.vendors import (
+    router as vendors_router,
 )
 
 from vendor_risk_analyzer.api.documents import (
     router as documents_router,
 )
-from vendor_risk_analyzer.api.health import (
-    router as health_router,
-)
-from vendor_risk_analyzer.api.vendors import (
-    router as vendors_router,
-)
-from vendor_risk_analyzer.auth.routes import (
-    router as auth_router,
-)
-from vendor_risk_analyzer.config import (
-    get_settings,
-)
-from vendor_risk_analyzer.embeddings.worker import (
-    run_embedding_worker,
-)
+
 from vendor_risk_analyzer.api.assessments import (
     router as assessments_router,
 )
 
+from vendor_risk_analyzer.api.chat import (
+    router as chat_router,
+)
 
-BASE_DIR = Path(
-    __file__
-).resolve().parent
+
+# ============================================================
+# AUTH
+# ============================================================
+
+from vendor_risk_analyzer.auth.routes import (
+    router as auth_router,
+)
+
+
+# ============================================================
+# SETTINGS
+# ============================================================
+
+from vendor_risk_analyzer.config import (
+    get_settings,
+)
+
+
+# ============================================================
+# AUTOMATIC EMBEDDING WORKER
+# ============================================================
+
+from vendor_risk_analyzer.embeddings.worker import (
+    run_embedding_worker,
+)
+
+
+# ============================================================
+# WEB APPLICATION ROUTES
+# ============================================================
+
+from vendor_risk_analyzer.web.routes import (
+    router as web_router,
+)
+
+
+# ============================================================
+# BASE DIRECTORY / SETTINGS
+# ============================================================
+
+BASE_DIR = (
+    Path(__file__)
+    .resolve()
+    .parent
+)
 
 settings = get_settings()
 
 
-def embedding_worker_enabled() -> bool:
-    value = os.getenv(
-        "EMBEDDING_WORKER_ENABLED",
-        "true",
-    )
-
-    return (
-        value
-        .strip()
-        .lower()
-        in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-    )
-
+# ============================================================
+# APPLICATION LIFESPAN
+# ============================================================
 
 @asynccontextmanager
 async def lifespan(
     app: FastAPI,
 ):
-    worker_task: (
-        asyncio.Task | None
-    ) = None
+    """
+    FastAPI application lifecycle.
 
-    if embedding_worker_enabled():
-        worker_task = (
-            asyncio.create_task(
-                run_embedding_worker(),
-                name="embedding-worker",
-            )
+    The automatic embedding worker runs
+    in the same process/container as the
+    FastAPI application.
+
+    This keeps the current low-cost
+    architecture:
+
+        FastAPI
+            +
+        embedding worker
+
+    inside the same Northflank service.
+
+    No additional:
+        - worker service
+        - Redis
+        - Celery
+        - queue service
+        - Northflank job
+
+    is required.
+    """
+
+    # --------------------------------------------------------
+    # Start automatic embedding worker
+    # --------------------------------------------------------
+
+    embedding_worker_task = (
+        asyncio.create_task(
+            run_embedding_worker(),
+            name=(
+                "automatic-embedding-worker"
+            ),
         )
+    )
+
 
     try:
+        # ----------------------------------------------------
+        # FastAPI runs while this context is active.
+        # ----------------------------------------------------
+
         yield
 
+
     finally:
-        if worker_task is not None:
-            worker_task.cancel()
+        # ----------------------------------------------------
+        # Graceful application shutdown.
+        #
+        # worker.py already handles CancelledError
+        # and performs its own cleanup.
+        # ----------------------------------------------------
 
-            with suppress(
-                asyncio.CancelledError
-            ):
-                await worker_task
+        if (
+            not embedding_worker_task.done()
+        ):
+            embedding_worker_task.cancel()
 
+
+        with suppress(
+            asyncio.CancelledError
+        ):
+            await embedding_worker_task
+
+
+# ============================================================
+# FASTAPI APPLICATION
+# ============================================================
 
 app = FastAPI(
-    title="Vendor Risk Analyzer",
-    description=(
-        "AI-powered vendor risk "
-        "assessment platform"
+    title=(
+        "Vendor Risk Analyzer"
     ),
-    version="0.1.0",
+
+    description=(
+        "AI-powered vendor security "
+        "and compliance assessment platform"
+    ),
+
+    version="0.2.0",
+
+    # --------------------------------------------------------
+    # Public API documentation remains disabled.
+    # --------------------------------------------------------
+
     docs_url=None,
+
     redoc_url=None,
+
     openapi_url=None,
+
+    # --------------------------------------------------------
+    # Startup / shutdown lifecycle.
+    # --------------------------------------------------------
+
     lifespan=lifespan,
 )
 
 
+# ============================================================
+# SESSION MIDDLEWARE
+# ============================================================
+
 app.add_middleware(
     SessionMiddleware,
+
     secret_key=(
         settings.session_secret
     ),
+
     session_cookie=(
         "vendor_risk_session"
     ),
+
     max_age=3600,
+
     same_site="lax",
+
     https_only=True,
 )
 
 
-# Register routes here
+# ============================================================
+# HEALTH / READINESS ROUTES
+# ============================================================
+
 app.include_router(
     health_router
 )
+
+
+# ============================================================
+# AUTHENTICATION ROUTES
+# ============================================================
 
 app.include_router(
     auth_router
 )
 
+
+# ============================================================
+# VENDOR API
+# ============================================================
+
 app.include_router(
     vendors_router
 )
 
+
+# ============================================================
+# DOCUMENT API
+# ============================================================
+
 app.include_router(
     documents_router
 )
+
+
+# ============================================================
+# ASSESSMENT API
+# ============================================================
 
 app.include_router(
     assessments_router
 )
 
 
+# ============================================================
+# GROUNDED CHAT API
+# ============================================================
+
+app.include_router(
+    chat_router
+)
+
+
+# ============================================================
+# WEB APPLICATION ROUTES
+# ============================================================
+
+# Web routes are defined in:
+#
+# vendor_risk_analyzer.web.routes
+#
+# Pages:
+#
+# /
+# /dashboard
+# /vendors
+# /documents
+# /assessments
+# /assessments/{assessment_id}
+# /chat
+# /profile
+# /admin/system
+#
+# Page visibility and authorization
+# are handled in the web routing layer.
+
+app.include_router(
+    web_router
+)
+
+
+# ============================================================
+# STATIC FILES
+# ============================================================
+
+# Serves:
+#
+# /static/css/app.css
+#
+# /static/js/common.js
+# /static/js/vendors.js
+# /static/js/documents.js
+# /static/js/assessments.js
+# /static/js/chat.js
+#
+# The old:
+#
+# /static/app.js
+# /static/style.css
+# /static/workspace.css
+#
+# are no longer required by the new
+# multi-page application.
+
 app.mount(
     "/static",
+
     StaticFiles(
         directory=(
-            BASE_DIR / "static"
-        )
+            BASE_DIR
+            / "static"
+        ),
     ),
+
     name="static",
 )
-
-
-templates = Jinja2Templates(
-    directory=(
-        BASE_DIR / "templates"
-    ),
-)
-
-
-@app.get(
-    "/",
-    response_class=HTMLResponse,
-)
-async def dashboard(
-    request: Request,
-):
-    user = request.session.get(
-        "user"
-    )
-
-    csrf_token = (
-        request.session.get(
-            "csrf_token"
-        )
-    )
-
-    if (
-        user
-        and not csrf_token
-    ):
-        csrf_token = (
-            secrets.token_urlsafe(
-                32
-            )
-        )
-
-        request.session[
-            "csrf_token"
-        ] = csrf_token
-
-    return templates.TemplateResponse(
-        request=request,
-        name="index.html",
-        context={
-            "app_name":
-                "Vendor Risk Analyzer",
-            "user":
-                user,
-            "csrf_token":
-                csrf_token,
-        },
-    )

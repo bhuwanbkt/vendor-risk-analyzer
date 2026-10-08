@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+
+{% block content %}
+
+<section class="page-heading">
+
+    <div>
+
+        <span class="eyebrow">
+            Vendor inventory
+        </span>
+
+        <h2>
+            Vendors
+        </h2>
+
+        <p>
+            Manage organizations included
+            in your risk-review workspace.
+        </p>
+
+    </div>
+
+</section>
+
+
+<div class="two-column-layout">
+
+
+    {% if can_manage %}
+
+    <section class="content-card">
+
+        <div class="card-heading">
+
+            <div>
+
+                <h3>
+                    Add Vendor
+                </h3>
+
+                <p>
+                    Register a vendor before
+                    uploading documents.
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <form
+            id="vendor-form"
+            class="form-stack"
+            data-csrf-token="{{ csrf_token }}"
+        >
+
+            <label>
+                Vendor name
+
+                <input
+                    id="vendor-name"
+                    type="text"
+                    maxlength="255"
+                    required
+                    placeholder="Example Corp"
+                >
+            </label>
+
+
+            <label>
+                Website
+
+                <input
+                    id="vendor-website"
+                    type="url"
+                    maxlength="500"
+                    placeholder="https://example.com"
+                >
+            </label>
+
+
+            <button
+                type="submit"
+                class="primary-button"
+            >
+                Add Vendor
+            </button>
+
+
+            <p
+                id="vendor-message"
+                class="form-message"
+            ></p>
+
+        </form>
+
+    </section>
+
+    {% endif %}
+
+
+    <section class="content-card">
+
+        <div class="card-heading">
+
+            <div>
+
+                <h3>
+                    Registered Vendors
+                </h3>
+
+                <p>
+                    {{ vendors|length }}
+                    vendor(s)
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <div class="vendor-grid">
+
+            {% for vendor in vendors %}
+
+                <article class="vendor-card">
+
+                    <div class="vendor-avatar">
+                        {{
+                            vendor.name[:2]
+                            | upper
+                        }}
+                    </div>
+
+
+                    <div class="vendor-card-body">
+
+                        <strong>
+                            {{ vendor.name }}
+                        </strong>
+
+                        <span>
+                            {{
+                                vendor.website
+                                or "No website"
+                            }}
+                        </span>
+
+                    </div>
+
+
+                    <span class="status-pill">
+                        {{ vendor.status }}
+                    </span>
+
+                </article>
+
+            {% else %}
+
+                <div class="empty-state">
+                    No vendors registered.
+                </div>
+
+            {% endfor %}
+
+        </div>
+
+    </section>
+
+</div>
+
+{% endblock %}
+
+
+{% block scripts %}
+
+{% if can_manage %}
+<script src="/static/js/vendors.js?v=1"></script>
+{% endif %}
+
+{% endblock %}
