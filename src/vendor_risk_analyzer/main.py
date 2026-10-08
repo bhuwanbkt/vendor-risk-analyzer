@@ -38,6 +38,9 @@ from vendor_risk_analyzer.config import (
 from vendor_risk_analyzer.embeddings.worker import (
     run_embedding_worker,
 )
+from vendor_risk_analyzer.api.assessments import (
+    router as assessments_router,
+)
 
 
 BASE_DIR = Path(
@@ -138,6 +141,10 @@ app.include_router(
 
 app.include_router(
     documents_router
+)
+
+app.include_router(
+    assessments_router
 )
 
 
