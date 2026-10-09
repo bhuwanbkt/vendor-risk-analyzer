@@ -324,15 +324,6 @@ app.include_router(
 # /static/js/documents.js
 # /static/js/assessments.js
 # /static/js/chat.js
-#
-# The old:
-#
-# /static/app.js
-# /static/style.css
-# /static/workspace.css
-#
-# are no longer required by the new
-# multi-page application.
 
 app.mount(
     "/static",
