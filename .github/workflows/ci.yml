@@ -34,7 +34,7 @@ jobs:
         run: uv sync --frozen --no-dev
 
       - name: Compile Python sources
-        run: uv run python -m compileall -q src tests
+        run: uv run python -m compileall -q src tests scripts
 
       - name: Run pytest with coverage
         run: |
