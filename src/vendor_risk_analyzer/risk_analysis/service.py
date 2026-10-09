@@ -419,12 +419,12 @@ RETRIEVED EVIDENCE
                 )
 
     @staticmethod
-    def _title_token_overlap(
+    def _token_overlap(
         left: str,
         right: str,
     ) -> float:
         """
-        Compare titles using a deterministic
+        Compare text using a deterministic
         token-overlap score.
 
         This is intentionally lightweight:
@@ -486,7 +486,9 @@ RETRIEVED EVIDENCE
           may be consolidated this way
         - findings must share at least one
           source document
-        - titles must have strong token overlap
+        - either titles strongly overlap, or
+          titles moderately overlap while the
+          descriptions also strongly overlap
         """
 
         if (
@@ -533,15 +535,28 @@ RETRIEVED EVIDENCE
             return False
 
         title_overlap = (
-            self._title_token_overlap(
+            self._token_overlap(
                 left.title,
                 right.title,
+            )
+        )
+
+        description_overlap = (
+            self._token_overlap(
+                left.description,
+                right.description,
             )
         )
 
         return (
             title_overlap
             >= 0.50
+            or (
+                title_overlap
+                >= 0.30
+                and description_overlap
+                >= 0.45
+            )
         )
 
     def deduplicate_findings(
@@ -563,8 +578,9 @@ RETRIEVED EVIDENCE
         2. An evidence_gap and explicit_risk
            may be consolidated when they have
            the same category, share a source
-           document, and strongly overlap in
-           title terms.
+           document, and have sufficient
+           deterministic title/description
+           overlap.
         3. Contradictions are never merged
            with a different finding type.
         4. Consolidation preserves the union
