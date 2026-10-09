@@ -2,14 +2,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
-from urllib.parse import (
-    parse_qsl,
-    urlencode,
-    urlsplit,
-    urlunsplit,
-)
-
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -17,6 +9,9 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
+from vendor_risk_analyzer.db.url import (
+    get_database_url,
+)
 from vendor_risk_analyzer.embeddings.service import (
     EmbeddingService,
 )
@@ -25,110 +20,6 @@ from vendor_risk_analyzer.retrieval.service import (
     SemanticRetriever,
     VendorNotFoundError,
 )
-
-
-def get_database_url() -> str:
-    database_url = os.getenv(
-        "DATABASE_URL"
-    )
-
-    if not database_url:
-        raise RuntimeError(
-            "DATABASE_URL is required."
-        )
-
-    return normalize_database_url(
-        database_url
-    )
-
-
-def normalize_database_url(
-    database_url: str,
-) -> str:
-
-    database_url = (
-        database_url.strip()
-    )
-
-    if database_url.startswith(
-        "postgres://"
-    ):
-        database_url = (
-            database_url.replace(
-                "postgres://",
-                "postgresql://",
-                1,
-            )
-        )
-
-    if database_url.startswith(
-        "postgresql+psycopg://"
-    ):
-        database_url = (
-            database_url.replace(
-                "postgresql+psycopg://",
-                "postgresql://",
-                1,
-            )
-        )
-
-    if database_url.startswith(
-        "postgresql+asyncpg://"
-    ):
-        database_url = (
-            database_url.replace(
-                "postgresql+asyncpg://",
-                "postgresql://",
-                1,
-            )
-        )
-
-    parsed = urlsplit(
-        database_url
-    )
-
-    query_params = dict(
-        parse_qsl(
-            parsed.query,
-            keep_blank_values=True,
-        )
-    )
-
-    query_params.pop(
-        "channel_binding",
-        None,
-    )
-
-    sslmode = query_params.pop(
-        "sslmode",
-        None,
-    )
-
-    if (
-        sslmode
-        and "ssl"
-        not in query_params
-    ):
-        query_params["ssl"] = (
-            sslmode
-        )
-
-    query_params.setdefault(
-        "prepared_statement_cache_size",
-        "0",
-    )
-
-    return urlunsplit(
-        (
-            "postgresql+asyncpg",
-            parsed.netloc,
-            parsed.path,
-            urlencode(
-                query_params
-            ),
-            parsed.fragment,
-        )
-    )
 
 
 async def main() -> int:

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from backfill_embeddings import (
+from vendor_risk_analyzer.db.url import (
     get_database_url,
 )
 from vendor_risk_analyzer.risk_policy.service import (
