@@ -9,8 +9,12 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  unit-tests:
+  quality-and-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -26,11 +30,26 @@ jobs:
       - name: Install uv
         run: python -m pip install --disable-pip-version-check uv
 
-      - name: Sync locked dependencies
+      - name: Sync locked application dependencies
         run: uv sync --frozen --no-dev
 
       - name: Compile Python sources
         run: uv run python -m compileall -q src tests
 
-      - name: Run unit tests
-        run: uv run --with pytest pytest -q
+      - name: Run pytest with coverage
+        run: |
+          mkdir -p test-results
+          uv run --with pytest --with pytest-cov pytest -q \
+            --junitxml=test-results/pytest.xml \
+            --cov=vendor_risk_analyzer \
+            --cov-report=term-missing \
+            --cov-report=xml:test-results/coverage.xml
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: warn
