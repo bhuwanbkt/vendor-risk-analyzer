@@ -36,4 +36,17 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+addopts = "-ra --strict-markers"
+markers = [
+    "unit: fast isolated tests with no external services",
+    "security: authorization, CSRF, and security regression tests",
+    "integration: tests that require external services or infrastructure",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["vendor_risk_analyzer"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 5
