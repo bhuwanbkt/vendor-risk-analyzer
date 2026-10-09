@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 
 from google import genai
 from pydantic import ValidationError
@@ -417,25 +418,162 @@ RETRIEVED EVIDENCE
                     )
                 )
 
+    @staticmethod
+    def _title_token_overlap(
+        left: str,
+        right: str,
+    ) -> float:
+        """
+        Compare titles using a deterministic
+        token-overlap score.
+
+        This is intentionally lightweight:
+        no additional model call, embedding,
+        or provider dependency is required.
+        """
+
+        left_tokens = set(
+            re.findall(
+                r"[a-z0-9]+",
+                left.lower(),
+            )
+        )
+
+        right_tokens = set(
+            re.findall(
+                r"[a-z0-9]+",
+                right.lower(),
+            )
+        )
+
+        if (
+            not left_tokens
+            or not right_tokens
+        ):
+            return 0.0
+
+        shared = (
+            left_tokens
+            & right_tokens
+        )
+
+        return (
+            len(shared)
+            / min(
+                len(left_tokens),
+                len(right_tokens),
+            )
+        )
+
+    def _same_root_cause(
+        self,
+        *,
+        left: RiskSignal,
+        right: RiskSignal,
+        evidence_by_id: dict[
+            str,
+            RetrievalResult,
+        ],
+    ) -> bool:
+        """
+        Decide whether an evidence gap and
+        explicit risk describe the same
+        underlying issue.
+
+        Guardrails:
+        - categories must match
+        - only evidence_gap + explicit_risk
+          may be consolidated this way
+        - findings must share at least one
+          source document
+        - titles must have strong token overlap
+        """
+
+        if (
+            left.category
+            != right.category
+        ):
+            return False
+
+        finding_types = {
+            left.finding_type,
+            right.finding_type,
+        }
+
+        if finding_types != {
+            "evidence_gap",
+            "explicit_risk",
+        }:
+            return False
+
+        left_documents = {
+            evidence_by_id[
+                chunk_id
+            ].document_id
+            for chunk_id
+            in left.evidence_chunk_ids
+            if chunk_id
+            in evidence_by_id
+        }
+
+        right_documents = {
+            evidence_by_id[
+                chunk_id
+            ].document_id
+            for chunk_id
+            in right.evidence_chunk_ids
+            if chunk_id
+            in evidence_by_id
+        }
+
+        if not (
+            left_documents
+            & right_documents
+        ):
+            return False
+
+        title_overlap = (
+            self._title_token_overlap(
+                left.title,
+                right.title,
+            )
+        )
+
+        return (
+            title_overlap
+            >= 0.50
+        )
+
     def deduplicate_findings(
         self,
         analysis: EvidenceAnalysis,
+        *,
+        evidence: list[
+            RetrievalResult
+        ],
     ) -> EvidenceAnalysis:
         """
         Collapse duplicate interpretations
-        of the same evidence.
+        while protecting distinct findings.
 
-        Important:
-        We only merge findings when both
-        category AND evidence set are equal.
-
-        This is intentionally conservative.
+        Rules:
+        1. Same-type findings with the same
+           category and exact evidence set
+           are duplicates.
+        2. An evidence_gap and explicit_risk
+           may be consolidated when they have
+           the same category, share a source
+           document, and strongly overlap in
+           title terms.
+        3. Contradictions are never merged
+           with a different finding type.
+        4. Consolidation preserves the union
+           of validated evidence IDs.
         """
 
-        priority = {
-            "explicit_risk": 3,
-            "contradiction": 2,
-            "evidence_gap": 1,
+        evidence_by_id = {
+            item.chunk_id: item
+            for item in evidence
         }
 
         deduplicated: list[
@@ -445,11 +583,6 @@ RETRIEVED EVIDENCE
         for finding in (
             analysis.findings
         ):
-            finding_ids = frozenset(
-                finding
-                .evidence_chunk_ids
-            )
-
             duplicate_index: (
                 int | None
             ) = None
@@ -460,6 +593,11 @@ RETRIEVED EVIDENCE
             ) in enumerate(
                 deduplicated
             ):
+                same_category = (
+                    existing.category
+                    == finding.category
+                )
+
                 existing_ids = (
                     frozenset(
                         existing
@@ -467,9 +605,11 @@ RETRIEVED EVIDENCE
                     )
                 )
 
-                same_category = (
-                    existing.category
-                    == finding.category
+                finding_ids = (
+                    frozenset(
+                        finding
+                        .evidence_chunk_ids
+                    )
                 )
 
                 same_evidence = (
@@ -477,9 +617,45 @@ RETRIEVED EVIDENCE
                     == finding_ids
                 )
 
+                same_type = (
+                    existing.finding_type
+                    == finding.finding_type
+                )
+
+                gap_risk_pair = {
+                    existing.finding_type,
+                    finding.finding_type,
+                } == {
+                    "evidence_gap",
+                    "explicit_risk",
+                }
+
+                same_root_cause = (
+                    gap_risk_pair
+                    and self._same_root_cause(
+                        left=existing,
+                        right=finding,
+                        evidence_by_id=(
+                            evidence_by_id
+                        ),
+                    )
+                )
+
                 if (
                     same_category
-                    and same_evidence
+                    and (
+                        (
+                            same_type
+                            and same_evidence
+                        )
+                        or (
+                            gap_risk_pair
+                            and (
+                                same_evidence
+                                or same_root_cause
+                            )
+                        )
+                    )
                 ):
                     duplicate_index = (
                         index
@@ -503,18 +679,42 @@ RETRIEVED EVIDENCE
                 ]
             )
 
-            if (
-                priority[
+            finding_types = {
+                existing.finding_type,
+                finding.finding_type,
+            }
+
+            if finding_types == {
+                "evidence_gap",
+                "explicit_risk",
+            }:
+                if (
                     finding.finding_type
-                ]
-                >
-                priority[
-                    existing.finding_type
-                ]
+                    == "explicit_risk"
+                ):
+                    preferred = finding
+                else:
+                    preferred = existing
+
+            elif (
+                finding.confidence
+                > existing.confidence
             ):
                 preferred = finding
+
             else:
                 preferred = existing
+
+            merged_evidence_ids = list(
+                dict.fromkeys(
+                    [
+                        *existing
+                        .evidence_chunk_ids,
+                        *finding
+                        .evidence_chunk_ids,
+                    ]
+                )
+            )
 
             deduplicated[
                 duplicate_index
@@ -531,12 +731,29 @@ RETRIEVED EVIDENCE
                 description=(
                     preferred.description
                 ),
-                evidence_chunk_ids=list(
-                    finding_ids
+                evidence_chunk_ids=(
+                    merged_evidence_ids
                 ),
                 confidence=max(
                     existing.confidence,
                     finding.confidence,
+                ),
+            )
+
+            logger.info(
+                "Risk analysis findings "
+                "consolidated. "
+                "category=%s "
+                "kept_type=%s "
+                "merged_types=%s "
+                "evidence_count=%s",
+                preferred.category,
+                preferred.finding_type,
+                sorted(
+                    finding_types
+                ),
+                len(
+                    merged_evidence_ids
                 ),
             )
 
@@ -672,7 +889,8 @@ RETRIEVED EVIDENCE
 
         normalized = (
             self.deduplicate_findings(
-                analysis
+                analysis,
+                evidence=evidence,
             )
         )
 
