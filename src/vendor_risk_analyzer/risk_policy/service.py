@@ -136,12 +136,6 @@ class RiskPolicyService:
             result.scalars().all()
         )
 
-        if not findings:
-            raise RiskPolicyError(
-                "Assessment contains "
-                "no findings."
-            )
-
         decisions: list[
             PolicyDecision
         ] = []
