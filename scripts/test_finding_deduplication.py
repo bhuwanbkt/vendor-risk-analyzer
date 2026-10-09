@@ -95,8 +95,13 @@ def test_northstar_gap_and_risk_merge() -> None:
                     "Exercise Not Available"
                 ),
                 description=(
-                    "Evidence of the completed "
-                    "2026 exercise is unavailable."
+                    "The evidence explicitly states "
+                    "that at the date of the document, "
+                    "evidence of a completed full "
+                    "technical recovery exercise for "
+                    "calendar year 2026 is not "
+                    "available as the test is "
+                    "scheduled for November 2026."
                 ),
                 chunk_ids=[
                     "dr-gap",
@@ -110,14 +115,22 @@ def test_northstar_gap_and_risk_merge() -> None:
                     "business_continuity"
                 ),
                 title=(
-                    "Uncompleted Full Technical "
-                    "Disaster-Recovery Exercise "
-                    "for Calendar Year 2026"
+                    "Unvalidated Recovery Procedures "
+                    "Due to Pending Full "
+                    "Disaster-Recovery Exercise"
                 ),
                 description=(
-                    "The full technical disaster-"
-                    "recovery exercise has not "
-                    "yet been completed."
+                    "An open risk (Risk ID: "
+                    "NR-BC-2026-01) notes that the "
+                    "organization has not yet "
+                    "completed a full technical "
+                    "disaster-recovery exercise "
+                    "during calendar year 2026, "
+                    "meaning current recovery "
+                    "procedures have not been fully "
+                    "validated against the documented "
+                    "RTO of 8 hours and RPO of "
+                    "4 hours."
                 ),
                 chunk_ids=[
                     "dr-risk",
