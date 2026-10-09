@@ -3,130 +3,18 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 from typing import Any
-from urllib.parse import (
-    parse_qsl,
-    urlencode,
-    urlsplit,
-    urlunsplit,
-)
-
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
+from vendor_risk_analyzer.db.url import (
+    get_database_url,
+)
 from vendor_risk_analyzer.embeddings.service import (
     EmbeddingError,
     EmbeddingService,
 )
-
-
-# ============================================================
-# Database configuration
-# ============================================================
-
-
-def get_database_url() -> str:
-    """
-    Read DATABASE_URL directly.
-
-    This worker does not need the complete application settings
-    such as ZITADEL, object storage, or session configuration.
-    """
-
-    database_url = os.getenv("DATABASE_URL")
-
-    if not database_url:
-        raise RuntimeError(
-            "DATABASE_URL is required."
-        )
-
-    return normalize_database_url(
-        database_url
-    )
-
-
-def normalize_database_url(
-    database_url: str,
-) -> str:
-    """
-    Normalize a Neon PostgreSQL URL for SQLAlchemy + asyncpg.
-    """
-
-    database_url = database_url.strip()
-
-    if database_url.startswith(
-        "postgres://"
-    ):
-        database_url = database_url.replace(
-            "postgres://",
-            "postgresql://",
-            1,
-        )
-
-    if database_url.startswith(
-        "postgresql+psycopg://"
-    ):
-        database_url = database_url.replace(
-            "postgresql+psycopg://",
-            "postgresql://",
-            1,
-        )
-
-    if database_url.startswith(
-        "postgresql+asyncpg://"
-    ):
-        database_url = database_url.replace(
-            "postgresql+asyncpg://",
-            "postgresql://",
-            1,
-        )
-
-    parsed = urlsplit(
-        database_url
-    )
-
-    query_params = dict(
-        parse_qsl(
-            parsed.query,
-            keep_blank_values=True,
-        )
-    )
-
-    # Neon may provide channel_binding.
-    query_params.pop(
-        "channel_binding",
-        None,
-    )
-
-    # Convert sslmode=require to ssl=require
-    # for asyncpg.
-    sslmode = query_params.pop(
-        "sslmode",
-        None,
-    )
-
-    if (
-        sslmode
-        and "ssl" not in query_params
-    ):
-        query_params["ssl"] = sslmode
-
-    query_params.setdefault(
-        "prepared_statement_cache_size",
-        "0",
-    )
-
-    return urlunsplit(
-        (
-            "postgresql+asyncpg",
-            parsed.netloc,
-            parsed.path,
-            urlencode(query_params),
-            parsed.fragment,
-        )
-    )
 
 
 # ============================================================
