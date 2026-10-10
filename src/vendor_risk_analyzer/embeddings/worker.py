@@ -8,16 +8,18 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
-from scripts.backfill_embeddings import (
+from scripts.ops.backfill_embeddings import (
     build_embedding_title,
     fetch_chunks,
     finalize_document,
-    get_database_url,
     get_document_embedding_state,
     mark_document_failed,
     normalize_metadata,
     save_embedding,
     verify_embedding,
+)
+from vendor_risk_analyzer.db.url import (
+    get_database_url,
 )
 from vendor_risk_analyzer.embeddings.service import (
     EmbeddingError,
