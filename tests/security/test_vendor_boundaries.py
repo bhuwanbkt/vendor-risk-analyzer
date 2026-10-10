@@ -35,14 +35,16 @@ def test_document_from_another_vendor_cannot_be_modified(security_api, action, r
     )
     assert response.status_code == 404
     assert response.json()["detail"] == "Document not found"
-    assert security_api.db.calls == ["execute"]
+    assert security_api.db.calls.count("execute") == 1
+    assert "commit" not in security_api.db.calls
     missing = security_api.client.post(
         f"/api/vendors/{ids['vendor_a']}/documents/{ids['missing']}/{action}",
         headers={"X-CSRF-Token": "test-csrf-token"},
     )
     assert missing.status_code == response.status_code
     assert missing.json() == response.json()
-    assert security_api.db.calls == ["execute", "execute"]
+    assert security_api.db.calls.count("execute") == 2
+    assert "commit" not in security_api.db.calls
     security_api.cloud.object_metadata.assert_not_called()
     security_api.cloud.ingest.assert_not_called()
 

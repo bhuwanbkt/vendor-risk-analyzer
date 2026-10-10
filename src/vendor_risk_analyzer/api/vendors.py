@@ -8,12 +8,14 @@ from fastapi import (
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from uuid import uuid4
+from vendor_risk_analyzer.auth.access import resolve_access
 
 from vendor_risk_analyzer.auth.dependencies import (
     require_roles,
     verify_csrf,
 )
-from vendor_risk_analyzer.db.models import Vendor
+from vendor_risk_analyzer.db.models import Vendor, VendorAssignment
 from vendor_risk_analyzer.db.session import get_db
 from vendor_risk_analyzer.schemas.vendor import (
     VendorCreate,
@@ -41,8 +43,9 @@ async def list_vendors(
         )
     ),
 ):
+    access = await resolve_access(db, user)
     result = await db.execute(
-        select(Vendor).order_by(
+        select(Vendor).where(access.vendor_filter()).order_by(
             Vendor.name
         )
     )
@@ -66,7 +69,10 @@ async def create_vendor(
     ),
     _: None = Depends(verify_csrf),
 ):
+    access = await resolve_access(db, user)
     vendor = Vendor(
+        id=uuid4(),
+        tenant_id=access.tenant.id,
         name=payload.name.strip(),
         website=payload.website,
         status="active",
@@ -75,6 +81,9 @@ async def create_vendor(
     db.add(vendor)
 
     try:
+        await db.flush()
+        if "admin" not in access.roles and access.member.access_mode == "assigned":
+            db.add(VendorAssignment(tenant_id=access.tenant.id, member_id=access.member.id, vendor_id=vendor.id))
         await db.commit()
 
     except IntegrityError as exc:

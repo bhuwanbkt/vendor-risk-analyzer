@@ -2,12 +2,16 @@ import secrets
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from fastapi.responses import RedirectResponse
 
-from vendor_risk_analyzer.auth.dependencies import get_current_user
+from vendor_risk_analyzer.auth.dependencies import get_current_user, verify_csrf
 from vendor_risk_analyzer.auth.oidc import oauth
+from vendor_risk_analyzer.auth.organizations import organization_roles, scoped_identity
 from vendor_risk_analyzer.config import get_settings
+from vendor_risk_analyzer.auth.access import resolve_access
+from vendor_risk_analyzer.db.session import get_db
 
 router = APIRouter(
     prefix="/auth",
@@ -117,19 +121,19 @@ async def callback(request: Request):
         {},
     )
 
-    roles = list(role_data) if isinstance(role_data, dict) else []
+    grants = organization_roles(role_data)
 
     # Replace temporary OIDC state and any prior account's CSRF token.
     request.session.clear()
-    request.session["user"] = {
+    request.session["user"] = scoped_identity({
         "sub": user.get("sub"),
         "name": user.get("name"),
         "email": user.get("email"),
         "preferred_username": user.get(
             "preferred_username"
         ),
-        "roles": roles,
-    }
+        "organization_roles": grants,
+    })
     request.session["csrf_token"] = secrets.token_urlsafe(32)
 
     return RedirectResponse(
@@ -169,3 +173,21 @@ async def logout(request: Request):
 @router.get("/me")
 async def current_user(request: Request):
     return get_current_user(request)
+
+
+class CompanySelection(BaseModel):
+    organization_id: str = Field(min_length=1, max_length=255)
+
+
+@router.post("/company")
+async def select_company(payload: CompanySelection, request: Request,
+                         db=Depends(get_db), _=Depends(verify_csrf)):
+    # Company switching belongs to browser sessions; tokens choose per request.
+    if request.headers.get("Authorization"):
+        raise HTTPException(400, "Use X-Organization-ID with bearer requests")
+    user = get_current_user(request)
+    user = scoped_identity(user, payload.organization_id)
+    await resolve_access(db, user)
+    request.session["user"] = user
+    request.session["csrf_token"] = secrets.token_urlsafe(32)
+    return {"redirect": "/dashboard"}

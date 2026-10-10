@@ -32,6 +32,8 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from vendor_risk_analyzer.auth.dependencies import get_current_user, get_user_roles
+from vendor_risk_analyzer.auth.access import resolve_access
+from vendor_risk_analyzer.db.models import Tenant
 
 from vendor_risk_analyzer.db.models import (
     Assessment,
@@ -230,8 +232,10 @@ def has_application_access(user: dict) -> bool:
 
 
 def sign_in_response(
-    request: Request, user: dict | None = None, *, status_code: int = 200
+    request: Request, user: dict | None = None, *, status_code: int = 200, access_message: str = ""
 ):
+    if user and user.get("company_claims_missing") and not access_message:
+        access_message = "Sign in again to refresh your company access."
     return templates.TemplateResponse(
         request=request,
         name="pages/sign_in.html",
@@ -240,6 +244,7 @@ def sign_in_response(
             "user": user,
             "display_name": user_display_name(user) if user else "",
             "page_title": "Access needed" if user else "Sign in",
+            "access_message": access_message,
         },
         status_code=status_code,
         headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
@@ -249,15 +254,33 @@ def sign_in_response(
 def page_access_response(request: Request, user: dict | None, *allowed_roles: str):
     if user is None:
         return login_redirect()
+    if not user.get("organization_id") and len(user.get("organization_roles", {})) > 1:
+        return RedirectResponse("/companies", status_code=302)
     if not has_application_access(user):
         return sign_in_response(request, user, status_code=403)
     require_page_roles(user, *allowed_roles)
     return None
 
 
+async def authorize_page(request, user, db, *roles):
+    response = page_access_response(request, user, *roles)
+    if response is not None:
+        return None, response
+    try:
+        access = await resolve_access(db, user)
+    except HTTPException as exc:
+        if exc.status_code != 403:
+            raise
+        return None, sign_in_response(request, user, status_code=403, access_message=exc.detail)
+    request.scope["company_name"] = access.tenant.name
+    return access, None
+
+
 @router.get("/sign-in", response_class=HTMLResponse)
 async def sign_in_page(request: Request):
     user = get_session_user(request)
+    if user and not user.get("organization_id") and len(user.get("organization_roles", {})) > 1:
+        return RedirectResponse("/companies", status_code=302)
     if user and has_application_access(user):
         return RedirectResponse(url="/dashboard", status_code=302)
     return sign_in_response(request, user)
@@ -276,6 +299,8 @@ async def root(
         request
     )
 
+    if user and not user.get("organization_id") and len(user.get("organization_roles", {})) > 1:
+        return RedirectResponse("/companies", status_code=302)
     if user is None or not has_application_access(user):
         return login_redirect()
 
@@ -304,7 +329,8 @@ async def dashboard_page(
         request
     )
 
-    if response := page_access_response(request, user, "viewer", "analyst", "admin"):
+    access, response = await authorize_page(request, user, db, "viewer", "analyst", "admin")
+    if response is not None:
         return response
 
     vendor_count = (
@@ -313,7 +339,7 @@ async def dashboard_page(
                 func.count(
                     Vendor.id
                 )
-            )
+            ).where(access.vendor_filter())
         )
         or 0
     )
@@ -327,6 +353,7 @@ async def dashboard_page(
                 )
             )
             .where(
+                Assessment.vendor_id.in_(access.vendor_ids()),
                 Assessment.status
                 == "completed"
             )
@@ -343,6 +370,7 @@ async def dashboard_page(
                 )
             )
             .where(
+                Finding.assessment_id.in_(select(Assessment.id).where(Assessment.vendor_id.in_(access.vendor_ids()))),
                 Finding.status
                 == "open"
             )
@@ -361,6 +389,7 @@ async def dashboard_page(
             Vendor.id
             == Assessment.vendor_id,
         )
+        .where(access.vendor_filter())
         .order_by(
             Assessment.created_at.desc()
         )
@@ -425,13 +454,15 @@ async def vendors_page(
         request
     )
 
-    if response := page_access_response(request, user, "viewer", "analyst", "admin"):
+    access, response = await authorize_page(request, user, db, "viewer", "analyst", "admin")
+    if response is not None:
         return response
 
     result = await db.execute(
         select(
             Vendor
         )
+        .where(access.vendor_filter())
         .order_by(
             Vendor.name
         )
@@ -476,13 +507,15 @@ async def documents_page(
         request
     )
 
-    if response := page_access_response(request, user, "viewer", "analyst", "admin"):
+    access, response = await authorize_page(request, user, db, "viewer", "analyst", "admin")
+    if response is not None:
         return response
 
     result = await db.execute(
         select(
             Vendor
         )
+        .where(access.vendor_filter())
         .order_by(
             Vendor.name
         )
@@ -527,13 +560,15 @@ async def assessments_page(
         request
     )
 
-    if response := page_access_response(request, user, "viewer", "analyst", "admin"):
+    access, response = await authorize_page(request, user, db, "viewer", "analyst", "admin")
+    if response is not None:
         return response
 
     vendor_result = await db.execute(
         select(
             Vendor
         )
+        .where(access.vendor_filter())
         .order_by(
             Vendor.name
         )
@@ -557,6 +592,7 @@ async def assessments_page(
                 Vendor.id
                 == Assessment.vendor_id,
             )
+            .where(access.vendor_filter())
             .order_by(
                 Assessment.created_at
                 .desc()
@@ -680,13 +716,11 @@ async def assessment_detail_page(
         request
     )
 
-    if response := page_access_response(request, user, "viewer", "analyst", "admin"):
+    access, response = await authorize_page(request, user, db, "viewer", "analyst", "admin")
+    if response is not None:
         return response
 
-    assessment = await db.get(
-        Assessment,
-        assessment_id,
-    )
+    assessment = await db.scalar(select(Assessment).where(Assessment.id == assessment_id, Assessment.vendor_id.in_(access.vendor_ids())))
 
     if assessment is None:
         raise HTTPException(
@@ -767,7 +801,8 @@ async def chat_page(
         request
     )
 
-    if response := page_access_response(request, user, "analyst", "admin"):
+    access, response = await authorize_page(request, user, db, "analyst", "admin")
+    if response is not None:
         return response
 
 
@@ -775,6 +810,7 @@ async def chat_page(
         select(
             Vendor
         )
+        .where(access.vendor_filter())
         .order_by(
             Vendor.name
         )
@@ -811,6 +847,7 @@ async def chat_page(
 )
 async def profile_page(
     request: Request,
+    db: AsyncSession = Depends(get_db),
 ):
     user = get_session_user(
         request
@@ -819,8 +856,11 @@ async def profile_page(
     if user is None:
         return login_redirect()
 
-    if not has_application_access(user):
+    if not has_application_access(user) and len(user.get("organization_roles", {})) <= 1:
         return sign_in_response(request, user)
+    access, response = await authorize_page(request, user, db, "viewer", "analyst", "admin")
+    if response is not None:
+        return response
 
 
     return templates.TemplateResponse(
@@ -848,12 +888,14 @@ async def profile_page(
 )
 async def system_page(
     request: Request,
+    db: AsyncSession = Depends(get_db),
 ):
     user = get_session_user(
         request
     )
 
-    if response := page_access_response(request, user, "admin"):
+    access, response = await authorize_page(request, user, db, "admin")
+    if response is not None:
         return response
 
 
@@ -901,3 +943,29 @@ async def system_page(
             system_info=system_info,
         ),
     )
+
+
+@router.get("/admin/access", response_class=HTMLResponse)
+async def access_page(request: Request, db: AsyncSession = Depends(get_db)):
+    user = get_session_user(request)
+    access, response = await authorize_page(request, user, db, "admin")
+    if response is not None:
+        return response
+    return templates.TemplateResponse(request=request, name="pages/access.html",
+        context=page_context(request=request, user=user, active_page="access",
+                             page_title="Company access"))
+
+
+@router.get("/companies", response_class=HTMLResponse)
+async def companies_page(request: Request, db: AsyncSession = Depends(get_db)):
+    user = get_session_user(request)
+    if user is None:
+        return login_redirect()
+    organizations = user.get("organization_roles", {})
+    if not organizations:
+        return sign_in_response(request, user, status_code=403)
+    companies = (await db.execute(select(Tenant).where(Tenant.zitadel_org_id.in_(organizations))
+                                 .order_by(Tenant.name))).scalars().all()
+    return templates.TemplateResponse(request=request, name="pages/companies.html",
+        context={"user": user, "companies": companies, "csrf_token": ensure_csrf_token(request)},
+        headers={"Cache-Control": "no-store"})

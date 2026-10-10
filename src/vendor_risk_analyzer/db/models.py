@@ -6,9 +6,12 @@ from uuid import UUID
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
+    Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -24,7 +27,28 @@ from vendor_risk_analyzer.db.base import (
     UUIDPrimaryKeyMixin,
 )
 
-from pgvector.sqlalchemy import Vector
+class Tenant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "tenants"
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # NULL is reserved for the locked legacy workspace awaiting operator binding.
+    zitadel_org_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    default_access: Mapped[str] = mapped_column(String(16), default="assigned", nullable=False)
+    __table_args__ = (CheckConstraint("default_access IN ('all', 'assigned')", name="ck_tenant_default_access"),)
+
+
+class TenantMembership(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "tenant_memberships"
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(255))
+    email: Mapped[str | None] = mapped_column(String(320))
+    access_mode: Mapped[str] = mapped_column(String(16), default="assigned", nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "subject", name="uq_membership_tenant_subject"),
+        UniqueConstraint("tenant_id", "id", name="uq_membership_tenant_id"),
+        CheckConstraint("access_mode IN ('all', 'assigned')", name="ck_membership_access_mode"),
+    )
 
 
 class Vendor(
@@ -34,10 +58,13 @@ class Vendor(
 ):
     __tablename__ = "vendors"
 
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True,
+    )
+
     name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
-        unique=True,
         index=True,
     )
 
@@ -67,6 +94,24 @@ class Vendor(
     assessments: Mapped[list[Assessment]] = relationship(
         back_populates="vendor",
         cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_vendor_tenant_name"),
+        UniqueConstraint("tenant_id", "id", name="uq_vendor_tenant_id"),
+    )
+
+
+class VendorAssignment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "vendor_assignments"
+    tenant_id: Mapped[UUID] = mapped_column(nullable=False)
+    member_id: Mapped[UUID] = mapped_column(nullable=False)
+    vendor_id: Mapped[UUID] = mapped_column(nullable=False)
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "member_id"], ["tenant_memberships.tenant_id", "tenant_memberships.id"], ondelete="CASCADE", name="fk_assignment_membership"),
+        ForeignKeyConstraint(["tenant_id", "vendor_id"], ["vendors.tenant_id", "vendors.id"], ondelete="CASCADE", name="fk_assignment_vendor"),
+        UniqueConstraint("member_id", "vendor_id", name="uq_assignment_member_vendor"),
+        Index("ix_assignment_tenant_member", "tenant_id", "member_id"),
     )
 
 

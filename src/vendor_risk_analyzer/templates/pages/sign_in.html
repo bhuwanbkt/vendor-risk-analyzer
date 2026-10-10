@@ -57,14 +57,22 @@
                 <h2>Your account needs access</h2>
                 <p>
                     You're signed in as <strong>{{ display_name }}</strong>.
+                    {% if access_message %}
+                    {{ access_message }}
+                    {% else %}
                     This account does not have an app role yet.
+                    {% endif %}
                 </p>
                 {% if user.email or user.preferred_username %}
                 <p class="entry-identity">{{ user.email or user.preferred_username }}</p>
                 {% endif %}
                 <p>
+                    {% if access_message %}
+                    Ask your company administrator to check your app access.
+                    {% else %}
                     Ask your app administrator to assign you Viewer, Analyst,
                     or Admin access. Once access is granted, sign in again.
+                    {% endif %}
                 </p>
             </div>
             <h2 id="sign-in-title">Sign in with another account</h2>

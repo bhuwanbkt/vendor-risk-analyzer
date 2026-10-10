@@ -231,6 +231,8 @@ def test_callback_verifies_identity_and_uses_original_pkce_verifier(oidc_provide
         "email": "oidc-user@example.invalid",
         "preferred_username": "oidc-user",
         "roles": ["analyst"],
+        "organization_roles": {"test-org": ["analyst"]},
+        "organization_id": "test-org",
     }
     token_request = next(
         r for r in provider.requests if r.url.path == "/oauth/v2/token"

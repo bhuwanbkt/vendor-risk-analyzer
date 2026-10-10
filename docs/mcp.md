@@ -62,9 +62,14 @@ never returned. Insufficient evidence also produces a fixed refusal with no
 sources. Provider failures still return a tool error.
 MCP has no upload, creation, deletion, arbitrary SQL, or arbitrary URL tools.
 
-Application roles currently grant access to all vendors. Vendor filtering keeps
-an individual result in its selected vendor; it does not create per-user ownership
-or tenant permissions.
+Application roles apply within the selected registered company. Each tool also
+checks the user's all-vendor or assigned-vendor policy. Company Admins can access
+all of their own company's vendors. Lists and pagination filter before limiting;
+foreign or unassigned vendor and assessment IDs return safe not-found errors.
+See [Company and vendor access](company-access.md) for registration and controls.
+For tokens granting roles in more than one organization, supply the
+`X-Organization-ID` header with the selected granted organization. It is optional
+when the token grants access to exactly one organization.
 
 ## Connect a client
 

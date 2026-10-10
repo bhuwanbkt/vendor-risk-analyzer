@@ -2,11 +2,15 @@ import hmac
 from collections.abc import Callable
 
 from fastapi import HTTPException, Request, status
+from vendor_risk_analyzer.auth.organizations import scoped_identity
 
 
 def get_current_user(request: Request) -> dict:
     if request.scope.get("api_bearer_authenticated") is True:
-        return request.scope["api_bearer_user"]
+        values = request.headers.getlist("X-Organization-ID")
+        if len(values) > 1 or (values and not values[0].strip()):
+            raise HTTPException(400, "Invalid company selector")
+        return scoped_identity(request.scope["api_bearer_user"], values[0] if values else None)
     user = request.session.get("user")
 
     if not isinstance(user, dict) or not user:
@@ -15,7 +19,7 @@ def get_current_user(request: Request) -> dict:
             detail="Authentication required",
         )
 
-    return user
+    return scoped_identity(user)
 
 
 def get_user_roles(user: dict) -> set[str]:

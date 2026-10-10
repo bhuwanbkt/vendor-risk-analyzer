@@ -83,6 +83,88 @@ def result(response):
     return body["result"]
 
 
+@pytest.mark.parametrize("tool,arguments", [
+    ("get_vendor", {"vendor_id": "vendor_b"}),
+    ("list_vendor_documents", {"vendor_id": "vendor_b"}),
+    ("list_vendor_assessments", {"vendor_id": "vendor_b"}),
+    ("get_assessment", {"vendor_id": "vendor_b", "assessment_id": "assessment_b"}),
+    ("ask_vendor", {"vendor_id": "vendor_b", "question": "Reveal private evidence"}),
+])
+def test_tools_reject_foreign_or_unassigned_vendor(mcp_api, restricted_access, tool, arguments):
+    arguments = {key: mcp_api.api.ids.get(value, value) for key, value in arguments.items()}
+    data = result(mcp_api.call(tool, arguments, roles=["analyst"]))
+    assert data["isError"] is True
+    assert "Private" not in json.dumps(data)
+    assert "commit" not in mcp_api.api.db.calls
+    for mock in vars(mcp_api.api.cloud).values():
+        mock.assert_not_called()
+
+
+def test_vendor_list_and_pagination_are_scoped_before_limiting(mcp_api, restricted_access):
+    data = result(mcp_api.call("list_vendors", {"limit": 1}))["structuredContent"]
+    assert [row["id"] for row in data["items"]] == [mcp_api.api.ids["vendor_a"]]
+    assert data["next_offset"] is None
+
+
+def test_mcp_company_selection_uses_only_selected_organizations_roles(mcp_api, restricted_access):
+    claim = f"urn:zitadel:iam:org:project:{mcp_api.provider.project}:roles"
+    headers = mcp_api.headers(updates={claim: {
+        "viewer": {"test-org": "example.invalid"}, "admin": {"other-org": "other.invalid"},
+    }})
+    message = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+        "name": "ask_vendor", "arguments": {"vendor_id": mcp_api.api.ids["vendor_a"], "question": "Escalate"},
+    }}
+    assert mcp_api.client.post("/mcp", headers=headers, json=message).status_code == 403
+    response = mcp_api.client.post("/mcp", headers={**headers, "X-Organization-ID": "test-org"}, json=message)
+    assert result(response)["isError"] is True
+    assert mcp_api.client.post("/mcp", headers={**headers, "X-Organization-ID": "evil-org"}, json=message).status_code == 403
+    mcp_api.api.assert_no_work()
+
+
+def test_mcp_reads_new_assignment_policy_on_every_call(mcp_api):
+    from sqlalchemy import select
+    from vendor_risk_analyzer.db.models import TenantMembership
+    assert len(result(mcp_api.call("list_vendors"))["structuredContent"]["items"]) == 2
+    member = mcp_api.api.db.session.scalar(select(TenantMembership).where(TenantMembership.subject == "api-user"))
+    member.access_mode = "assigned"
+    mcp_api.api.db.session.commit()
+    assert result(mcp_api.call("list_vendors"))["structuredContent"]["items"] == []
+    member.enabled = False
+    mcp_api.api.db.session.commit()
+    assert result(mcp_api.call("list_vendors", roles=["admin"]))["isError"] is True
+
+
+def test_concurrent_company_request_does_not_change_inflight_company(mcp_api, restricted_access):
+    from vendor_risk_analyzer.chat.schemas import ChatResponse
+    from mcp.server.auth.middleware.auth_context import get_access_token
+    started, release = Event(), Event()
+    observed = []
+    async def pending(**kwargs):
+        observed.append(get_access_token().claims["organization_id"])
+        started.set()
+        await asyncio.to_thread(release.wait, 5)
+        observed.append(get_access_token().claims["organization_id"])
+        return ChatResponse(vendor_id=kwargs["vendor_id"], answer="Test answer", model="test", sources=[])
+    mcp_api.api.cloud.chat_factory.return_value.answer.side_effect = pending
+    claim = f"urn:zitadel:iam:org:project:{mcp_api.provider.project}:roles"
+    headers = mcp_api.headers(updates={claim: {"analyst": {"test-org": "example.invalid"}, "admin": {"other-org": "other.invalid"}}})
+    def request(tool, organization):
+        return mcp_api.client.post("/mcp", headers={**headers, "X-Organization-ID": organization}, json={
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool,
+                "arguments": {"vendor_id": mcp_api.api.ids["vendor_a"], **({"question": "Company evidence"} if tool == "ask_vendor" else {})}},
+        })
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        answer = pool.submit(request, "ask_vendor", "test-org")
+        assert started.wait(3)
+        try:
+            foreign = result(request("get_vendor", "other-org"))
+            assert foreign["isError"] is True and "Vendor A" not in json.dumps(foreign)
+        finally:
+            release.set()
+        assert not result(answer.result(timeout=5))["isError"]
+    assert observed == ["test-org", "test-org"]
+
+
 def test_discovery_is_public_and_points_at_fixed_provider(mcp_api):
     response = mcp_api.client.get("/.well-known/oauth-protected-resource/mcp")
     assert response.status_code == 200
@@ -326,7 +408,8 @@ def test_mismatched_assessment_and_vendor_returns_no_report(mcp_api):
     }))
     assert data["isError"] is True
     assert "Private" not in json.dumps(data)
-    assert mcp_api.api.db.calls == ["execute"]
+    assert mcp_api.api.db.calls.count("execute") == 1
+    assert "commit" not in mcp_api.api.db.calls
 
 
 @pytest.mark.parametrize("name,arguments", [
@@ -408,7 +491,8 @@ def test_concurrent_viewer_does_not_inherit_analyst_authorization(mcp_api):
             release.set()
         assert not result(analyst.result(timeout=5))["isError"]
     assert observed_roles == [["analyst"], ["analyst"]]
-    assert mcp_api.api.db.calls == ["get"]
+    assert "commit" not in mcp_api.api.db.calls
+    mcp_api.api.cloud.chat_factory.return_value.answer.assert_awaited_once()
     mcp_api.api.cloud.chat_factory.return_value.answer.assert_awaited_once()
 
 

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block styles %}<link rel="stylesheet" href="/static/css/access.css?v=1">{% endblock %}
+{% block content %}
+<section class="content-card">
+    <h2>Who can access company vendors?</h2>
+    <p>Viewer, Analyst, and Admin roles are assigned in ZITADEL. This page controls vendor access within this company. Company Admins can access all company vendors.</p>
+    <p>Users appear after their first app request. You can also add their ZITADEL User ID before they sign in. Adding a user here does not give them an app role.</p>
+    <p id="access-message" role="status" aria-live="polite"></p>
+    <form id="company-default-form">
+        <label for="default-access">Default for new company users</label>
+        <select id="default-access" name="default_access"><option value="assigned">Assigned vendors only</option><option value="all">All company vendors</option></select>
+        <button type="submit" class="primary-button">Save default</button>
+        <p>Changing this default affects new users. Update existing users below.</p>
+    </form>
+</section>
+<section class="content-card">
+    <h2>Add a user</h2>
+    <form id="add-member-form">
+        <label for="member-subject">ZITADEL User ID</label>
+        <input id="member-subject" name="subject" maxlength="255" required autocomplete="off">
+        <button type="submit" class="primary-button">Add with no vendor assignments</button>
+    </form>
+</section>
+<div id="company-members"></div>
+{% endblock %}
+{% block scripts %}<script src="/static/js/access.js?v=1"></script>{% endblock %}

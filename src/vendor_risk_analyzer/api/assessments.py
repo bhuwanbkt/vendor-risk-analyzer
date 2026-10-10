@@ -22,6 +22,7 @@ from vendor_risk_analyzer.auth.dependencies import (
     require_roles,
     verify_csrf,
 )
+from vendor_risk_analyzer.auth.access import resolve_access, require_vendor_access
 from vendor_risk_analyzer.db.session import (
     get_db,
 )
@@ -62,11 +63,11 @@ router = APIRouter(
 
 
 async def load_assessment_response(
-    *, db: AsyncSession, assessment_id: UUID
+    *, db: AsyncSession, assessment_id: UUID, access
 ) -> AssessmentResponse:
     try:
         return await repository.load_assessment_response(
-            db=db, assessment_id=assessment_id
+            db=db, assessment_id=assessment_id, access=access
         )
     except repository.AssessmentNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Assessment not found") from exc
@@ -99,6 +100,7 @@ async def get_assessment(
 
     This endpoint is read-only.
     """
+    access = await resolve_access(db, user)
 
     logger.info(
         "Assessment API read started. "
@@ -109,6 +111,7 @@ async def get_assessment(
     response = (
         await load_assessment_response(
             db=db,
+            access=access,
             assessment_id=(
                 assessment_id
             ),
@@ -181,6 +184,7 @@ async def create_assessment(
     - deterministic policy assigns severity
     - no numeric overall score is invented
     """
+    access = await require_vendor_access(db, user, vendor_id)
 
     logger.info(
         "Assessment API creation started. "
@@ -364,6 +368,7 @@ async def create_assessment(
         response = (
             await load_assessment_response(
                 db=db,
+                access=access,
                 assessment_id=(
                     persisted
                     .assessment_id

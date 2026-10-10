@@ -94,4 +94,6 @@ def test_sign_out_is_visible_outside_the_profile_dropdown(security_api):
     response = security_api.client.get("/profile")
     assert response.status_code == 200
     assert '<a href="/auth/logout" class="sign-out-button">Sign out</a>' in response.text
-    security_api.assert_no_work()
+    assert "commit" not in security_api.db.calls
+    for mock in vars(security_api.cloud).values():
+        mock.assert_not_called()

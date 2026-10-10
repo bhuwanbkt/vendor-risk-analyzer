@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -25,9 +26,9 @@ def main():
     assert urlsplit(app_url).hostname == "localhost"
     csrf = "compose-smoke-csrf"
 
-    def cookie(role):
+    def cookie(role, subject="compose-smoke-user"):
         payload = {
-            "user": {"sub": "compose-smoke-user", "roles": [role]},
+            "user": {"sub": subject, "organization_roles": {"compose-smoke-org": [role]}},
             "csrf_token": csrf,
         }
         data = base64.b64encode(json.dumps(payload).encode())
@@ -62,6 +63,12 @@ def main():
     page = request(app_url + "/sign-in")
     assert page[0] == 200 and b"Sign in to your workspace" in page[2]
     assert request(app_url + "/api/vendors")[0] == 401
+    # Simultaneous first requests exercise membership registration with real
+    # PostgreSQL transactions and separate application sessions.
+    def first_request(_):
+        return request(app_url + "/api/vendors", headers={"Cookie": cookie("viewer", "compose-first-request-race")})[0]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        assert list(pool.map(first_request, range(4))) == [200] * 4
     if config.get("MCP_ENABLED", "false").lower() == "true":
         status, _, body = request(app_url + "/.well-known/oauth-protected-resource/mcp")
         assert status == 200

@@ -24,6 +24,7 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from vendor_risk_analyzer.config import get_settings
+from vendor_risk_analyzer.auth.organizations import organization_roles
 
 
 class InvalidBearerToken(Exception):
@@ -166,24 +167,11 @@ class BearerTokenVerifier:
             role_data = claims.get(
                 f"urn:zitadel:iam:org:project:{self.project_id}:roles", {}
             )
-            roles = []
-            if isinstance(role_data, dict):
-                for role, grants in role_data.items():
-                    if (
-                        isinstance(role, str)
-                        and isinstance(grants, dict)
-                        and grants
-                        and all(
-                            isinstance(org, str)
-                            and org
-                            and isinstance(domain, str)
-                            and domain
-                            for org, domain in grants.items()
-                        )
-                    ):
-                        roles.append(role)
+            grants = organization_roles(role_data)
+            roles = sorted({role for roles in grants.values() for role in roles})
             return VerifiedAccessToken(
-                user={"sub": claims["sub"], "roles": roles}, claims=claims
+                user={"sub": claims["sub"], "roles": roles, "organization_roles": grants},
+                claims=claims,
             )
         except (
             JoseError,

@@ -64,6 +64,8 @@ def test_require_roles_rejects_unauthorized_role() -> None:
     request = make_request(
         session={
             "user": {
+                "sub": "test-user",
+                "organization_roles": {"test-org": ["viewer"]},
                 "roles": [
                     "viewer"
                 ]
@@ -89,6 +91,9 @@ def test_require_roles_rejects_unauthorized_role() -> None:
 
 def test_require_roles_allows_authorized_role() -> None:
     user = {
+        "sub": "test-user",
+        "organization_roles": {"test-org": ["analyst"]},
+        "organization_id": "test-org",
         "roles": [
             "analyst"
         ]

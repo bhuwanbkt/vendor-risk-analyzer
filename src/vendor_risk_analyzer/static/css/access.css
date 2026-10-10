@@ -1,0 +1,17 @@
+#company-default-form, #add-member-form, .access-member {
+    display: grid;
+    gap: 14px;
+    max-width: 850px;
+}
+.access-member fieldset {
+    display: grid;
+    gap: 10px;
+    padding: 18px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+.access-member fieldset[hidden] { display: none; }
+.access-member label { flex-direction: row; align-items: center; }
+.access-member input[type="checkbox"] { width: auto; }
+.access-member p { overflow-wrap: anywhere; }
+#access-message { color: var(--primary); }

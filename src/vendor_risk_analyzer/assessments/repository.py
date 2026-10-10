@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from vendor_risk_analyzer.auth.access import AccessContext
 
 from vendor_risk_analyzer.db.models import Assessment, Finding
 from vendor_risk_analyzer.schemas.assessment import (
@@ -28,9 +29,11 @@ def build_finding_response(finding: Finding) -> AssessmentFindingResponse:
 
 
 async def load_assessment_response(
-    *, db: AsyncSession, assessment_id: UUID, vendor_id: UUID | None = None
+    *, db: AsyncSession, assessment_id: UUID, access: AccessContext,
+    vendor_id: UUID | None = None,
 ) -> AssessmentResponse:
     query = select(Assessment).where(Assessment.id == assessment_id)
+    query = query.where(Assessment.vendor_id.in_(access.vendor_ids()))
     if vendor_id is not None:
         query = query.where(Assessment.vendor_id == vendor_id)
     assessment = (await db.execute(query)).scalar_one_or_none()

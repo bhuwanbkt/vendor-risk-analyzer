@@ -19,7 +19,7 @@
             </h1>
 
             <p>
-                Vendor security intelligence
+                {{ request.scope.get('company_name', 'Vendor security intelligence') }}
             </p>
 
         </div>
@@ -92,6 +92,9 @@
             <a href="/profile">
                 My Profile
             </a>
+            {% if user.organization_roles|length > 1 %}
+            <a href="/companies">Switch company</a>
+            {% endif %}
 
 
             <a

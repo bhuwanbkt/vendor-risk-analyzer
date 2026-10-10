@@ -22,6 +22,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.applications import Starlette
@@ -38,6 +39,8 @@ from vendor_risk_analyzer.auth.bearer import (
     get_bearer_verifier,
 )
 from vendor_risk_analyzer.auth.dependencies import get_user_roles
+from vendor_risk_analyzer.auth.access import resolve_access
+from vendor_risk_analyzer.auth.organizations import scoped_identity
 from vendor_risk_analyzer.chat.schemas import ChatResponse
 from vendor_risk_analyzer.chat.service import (
     ChatGroundingError,
@@ -127,7 +130,7 @@ class ZitadelTokenVerifier(TokenVerifier):
                 scopes=[],
                 claims={
                     "iss": verified.claims["iss"],
-                    "roles": verified.user["roles"],
+                    **verified.user,
                 },
             )
         except InvalidBearerToken:
@@ -148,11 +151,23 @@ class ProtocolRoleGate:
 
     async def __call__(self, scope, receive, send):
         token = get_access_token()
+        if token is not None:
+            try:
+                values = Headers(scope=scope).getlist("x-organization-id")
+                if len(values) > 1 or (values and not values[0].strip()):
+                    raise HTTPException(400, "Invalid company selector")
+                # This AccessToken belongs to this authenticated HTTP request.
+                token.claims = scoped_identity(token.claims or {}, values[0] if values else None)
+            except HTTPException as exc:
+                return await JSONResponse({"detail": exc.detail}, status_code=exc.status_code)(scope, receive, send)
         if token is not None and not get_user_roles(token.claims or {}).intersection(
             READ_ROLES
         ):
+            detail = "An application role is required"
+            if len((token.claims or {}).get("organization_roles", {})) > 1:
+                detail = "Select a company using X-Organization-ID"
             response = JSONResponse(
-                {"detail": "An application role is required"}, status_code=403
+                {"detail": detail}, status_code=403
             )
             return await response(scope, receive, send)
         return await self.app(scope, receive, send)
@@ -230,8 +245,18 @@ def database_errors(function):
     return safe
 
 
-async def require_vendor(db, vendor_id: UUID) -> Vendor:
-    vendor = await db.get(Vendor, vendor_id)
+async def tool_access(db):
+    token = get_access_token()
+    if token is None:
+        raise ToolError("Authentication required")
+    try:
+        return await resolve_access(db, token.claims or {})
+    except HTTPException as exc:
+        raise ToolError(exc.detail) from exc
+
+
+async def require_vendor(db, vendor_id: UUID, access) -> Vendor:
+    vendor = await db.scalar(select(Vendor).where(Vendor.id == vendor_id, access.vendor_filter()))
     if vendor is None:
         raise ToolError("Vendor not found")
     return vendor
@@ -282,9 +307,10 @@ def create_mcp_application(
         """List vendors in name order, with bounded pagination."""
         require_tool_roles(*READ_ROLES)
         async with session_factory() as db:
+            access = await tool_access(db)
             rows = (
                 await db.execute(
-                    select(Vendor).order_by(Vendor.name, Vendor.id)
+                    select(Vendor).where(access.vendor_filter()).order_by(Vendor.name, Vendor.id)
                     .limit(limit + 1).offset(offset)
                 )
             ).scalars().all()
@@ -299,7 +325,8 @@ def create_mcp_application(
         """Read one vendor's public application fields."""
         require_tool_roles(*READ_ROLES)
         async with session_factory() as db:
-            return VendorResponse.model_validate(await require_vendor(db, vendor_id))
+            access = await tool_access(db)
+            return VendorResponse.model_validate(await require_vendor(db, vendor_id, access))
 
     @server.tool(annotations=read_annotations)
     @database_errors
@@ -309,7 +336,8 @@ def create_mcp_application(
         """List one vendor's document metadata; no storage URLs or file contents."""
         require_tool_roles(*READ_ROLES)
         async with session_factory() as db:
-            await require_vendor(db, vendor_id)
+            access = await tool_access(db)
+            await require_vendor(db, vendor_id, access)
             rows = (
                 await db.execute(
                     select(Document).where(Document.vendor_id == vendor_id)
@@ -331,7 +359,8 @@ def create_mcp_application(
         """List one vendor's saved assessments, newest first."""
         require_tool_roles(*READ_ROLES)
         async with session_factory() as db:
-            await require_vendor(db, vendor_id)
+            access = await tool_access(db)
+            await require_vendor(db, vendor_id, access)
             rows = (
                 await db.execute(
                     select(Assessment).where(Assessment.vendor_id == vendor_id)
@@ -354,9 +383,10 @@ def create_mcp_application(
         """Read a saved assessment and findings only if it belongs to this vendor."""
         require_tool_roles(*READ_ROLES)
         async with session_factory() as db:
+            access = await tool_access(db)
             try:
                 return await load_assessment_response(
-                    db=db, assessment_id=assessment_id, vendor_id=vendor_id
+                    db=db, assessment_id=assessment_id, vendor_id=vendor_id, access=access
                 )
             except AssessmentNotFoundError as exc:
                 raise ToolError("Assessment not found for this vendor") from exc
@@ -376,7 +406,8 @@ def create_mcp_application(
         if not question:
             raise ToolError("Question must not be blank")
         async with session_factory() as db:
-            await require_vendor(db, vendor_id)
+            access = await tool_access(db)
+            await require_vendor(db, vendor_id, access)
             embedding = None
             try:
                 embedding = EmbeddingService()

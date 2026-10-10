@@ -65,6 +65,7 @@ def build_navigation(
     if (
         "admin" in roles
     ):
+        navigation.append({"label": "Company access", "href": "/admin/access", "key": "access", "icon": "♙"})
         navigation.append(
             {
                 "label": "System",

@@ -136,3 +136,12 @@ to verify RBAC, private signed uploads, internal downloads, ingestion and
 persistence. CI also enables MCP to check startup, OAuth discovery, and rejection
 of anonymous/cookie requests. It does not test actual ZITADEL login or Gemini output. Check those
 manually with your own development accounts and sample vendor documents.
+
+
+## Initial company registration
+
+After migrations, link the existing workspace to your ZITADEL Organization ID
+before accessing vendor data. This applies to both Compose and native uv runs.
+See [company registration](company-access.md#register-the-initial-company) for
+the commands. Organization IDs are not project or client IDs. Additional
+companies start empty and default to assigned-vendor access.

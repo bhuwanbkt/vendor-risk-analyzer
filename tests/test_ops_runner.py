@@ -92,3 +92,13 @@ def test_unknown_task_is_rejected() -> None:
                     "delete_everything",
             }
         )
+
+
+def test_tenant_registration_requires_explicit_org_and_defaults_to_preview():
+    with pytest.raises(ValueError, match="OPS_ZITADEL_ORG_ID"):
+        build_command({"OPS_TASK": "register_tenant"})
+    command = build_command({"OPS_TASK": "register_tenant", "OPS_ZITADEL_ORG_ID": "org-123",
+                             "OPS_TENANT_NAME": "My Company", "OPS_LEGACY_TENANT": "true"})
+    assert "register_tenant.py" in command[1]
+    assert command[2:] == ["--org-id", "org-123", "--name", "My Company", "--legacy"]
+    assert "--write" not in command

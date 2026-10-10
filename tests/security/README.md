@@ -60,9 +60,13 @@ calls close their embedding client. MCP client/provider login remains a live che
 
 Vendor boundaries cover document list filters, vendor/document ID matching before
 completion or ingestion, vendor-specific upload keys, assessment finding separation,
-and explicit vendor context passed to chat. Application roles currently have access
-to all vendors: this suite does not assert per-user or tenant ownership, which the
-current schema does not model. SQLite does not validate PostgreSQL/pgvector search.
+and explicit vendor context passed to chat. Company tests additionally verify
+organization-specific role grants, company isolation, per-user assignments, Admin
+scope, dashboard totals, disabled memberships, assignment revocation, safe foreign-ID
+denials before cloud work, company switching/CSRF, and operator registration guards.
+SQLite enables foreign keys and rejects cross-company assignments. It does not
+validate PostgreSQL/pgvector search. The CI Compose job migrates existing PostgreSQL
+records, verifies tenant constraints, and compares the migrated schema with the ORM.
 The OIDC tests do not exercise ZITADEL's hosted login UI, its browser SSO cookies,
 or actual provider session termination. A separate CI Compose job exercises real
 PostgreSQL/pgvector migrations and private MinIO uploads/downloads/ingestion.
