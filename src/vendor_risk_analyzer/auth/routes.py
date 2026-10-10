@@ -2,6 +2,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
+from vendor_risk_analyzer.auth.dependencies import get_current_user
 from vendor_risk_analyzer.auth.oidc import oauth
 from vendor_risk_analyzer.config import get_settings
 
@@ -117,12 +118,4 @@ async def logout(request: Request):
 
 @router.get("/me")
 async def current_user(request: Request):
-    user = request.session.get("user")
-
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Not authenticated",
-        )
-
-    return user
+    return get_current_user(request)

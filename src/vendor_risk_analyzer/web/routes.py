@@ -31,6 +31,8 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession,
 )
 
+from vendor_risk_analyzer.auth.dependencies import get_current_user, get_user_roles
+
 from vendor_risk_analyzer.db.models import (
     Assessment,
     Finding,
@@ -43,7 +45,6 @@ from vendor_risk_analyzer.db.session import (
 
 from vendor_risk_analyzer.web.navigation import (
     build_navigation,
-    normalize_roles,
 )
 
 
@@ -73,24 +74,17 @@ router = APIRouter(
 def get_session_user(
     request: Request,
 ) -> dict | None:
-    user = request.session.get(
-        "user"
-    )
-
-    if not isinstance(
-        user,
-        dict,
-    ):
+    try:
+        return get_current_user(request)
+    except HTTPException:
         return None
-
-    return user
 
 
 def require_page_roles(
     user: dict,
     *allowed_roles: str,
 ) -> None:
-    roles = normalize_roles(
+    roles = get_user_roles(
         user
     )
 
@@ -116,7 +110,7 @@ def ensure_csrf_token(
         "csrf_token"
     )
 
-    if not csrf_token:
+    if not isinstance(csrf_token, str) or not csrf_token or not csrf_token.isascii():
         csrf_token = (
             secrets.token_urlsafe(
                 32
@@ -180,7 +174,7 @@ def page_context(
     **extra,
 ) -> dict:
 
-    roles = normalize_roles(
+    roles = get_user_roles(
         user
     )
 
@@ -275,6 +269,7 @@ async def dashboard_page(
     if user is None:
         return login_redirect()
 
+    require_page_roles(user, "viewer", "analyst", "admin")
 
     vendor_count = (
         await db.scalar(
@@ -397,6 +392,7 @@ async def vendors_page(
     if user is None:
         return login_redirect()
 
+    require_page_roles(user, "viewer", "analyst", "admin")
 
     result = await db.execute(
         select(
@@ -449,6 +445,7 @@ async def documents_page(
     if user is None:
         return login_redirect()
 
+    require_page_roles(user, "viewer", "analyst", "admin")
 
     result = await db.execute(
         select(
@@ -501,6 +498,7 @@ async def assessments_page(
     if user is None:
         return login_redirect()
 
+    require_page_roles(user, "viewer", "analyst", "admin")
 
     vendor_result = await db.execute(
         select(
@@ -655,6 +653,7 @@ async def assessment_detail_page(
     if user is None:
         return login_redirect()
 
+    require_page_roles(user, "viewer", "analyst", "admin")
 
     assessment = await db.get(
         Assessment,
