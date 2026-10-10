@@ -71,8 +71,10 @@ For a client supporting bearer headers, configure:
 
 Use a ZITADEL JWT `access_token`, not an ID token, PAT, or opaque token. The token
 must include the configured project audience, project-specific role grants, and
-ZITADEL's `azp` OAuth client ID. Set JWT access tokens in the OAuth client's Token
-Settings and obtain a token through its supported OAuth flow.
+the OAuth client ID in `client_id` (current ZITADEL access tokens) or `azp`
+(legacy tokens). If both claims are present, they must contain the same nonempty
+string. Set JWT access tokens in the OAuth client's Token Settings and obtain a
+token through its supported OAuth flow.
 
 The server publishes public OAuth Protected Resource Metadata at
 `/.well-known/oauth-protected-resource/mcp`. Its 401 challenge points to that URL.

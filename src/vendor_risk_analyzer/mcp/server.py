@@ -100,12 +100,25 @@ class ZitadelTokenVerifier(TokenVerifier):
     async def verify_token(self, token: str) -> AccessToken | None:
         try:
             verified = await self.verifier.verify_access_token(token)
-            client_id = verified.claims.get("azp")
-            if not isinstance(client_id, str) or not client_id.strip():
+            # Current ZITADEL access tokens use client_id; older tokens use azp.
+            # Both values come from verified claims and must agree if present.
+            client_ids = [
+                verified.claims[name]
+                for name in ("client_id", "azp")
+                if name in verified.claims
+            ]
+            if (
+                not client_ids
+                or any(
+                    not isinstance(value, str) or not value.strip()
+                    for value in client_ids
+                )
+                or len(set(client_ids)) != 1
+            ):
                 raise InvalidBearerToken()
             return AccessToken(
                 token=token,
-                client_id=client_id,
+                client_id=client_ids[0],
                 subject=verified.user["sub"],
                 expires_at=int(verified.claims["exp"]),
                 # ZITADEL uses project audiences rather than RFC 8707 URL audiences.
