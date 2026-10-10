@@ -26,10 +26,20 @@ unknown, malformed, and incorrectly cased role claims grant no application acces
 Tests also cover missing or invalid CSRF tokens, expired or modified session cookies,
 secure cookie attributes, and rejection before database or external-service work.
 
+OIDC flow tests exercise the real Authlib client, authorization state, S256 PKCE,
+nonce checks, signed ID tokens, issuer/audience/signature/expiry validation, and the
+application callback. Provider discovery, token, JWKS, and UserInfo HTTP responses
+use an in-process HTTPX transport with test-only RSA keys. No identity-provider
+account, credentials, or network connections are needed. Tests reject missing ID
+tokens and invalid or mismatched UserInfo, grant no access for malformed project
+roles, replace the old identity during a new login, rotate CSRF tokens after login,
+and verify local logout plus the encoded ZITADEL client/return-URI redirect.
+
 Vendor boundaries cover document list filters, vendor/document ID matching before
 completion or ingestion, vendor-specific upload keys, assessment finding separation,
 and explicit vendor context passed to chat. Application roles currently have access
 to all vendors: this suite does not assert per-user or tenant ownership, which the
-current schema does not model. SQLite does not validate PostgreSQL/pgvector search;
-OIDC login, object storage, LLM behavior, and Northflank deployment require separate
-live integration validation.
+current schema does not model. SQLite does not validate PostgreSQL/pgvector search.
+The OIDC tests do not exercise ZITADEL's hosted login UI, its browser SSO cookies,
+or actual provider session termination. Those behaviors, object storage, LLMs, and
+Northflank deployment still require live integration validation.
