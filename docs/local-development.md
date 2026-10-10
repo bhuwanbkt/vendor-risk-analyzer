@@ -11,7 +11,8 @@ using a separate Docker build stage; no Go installation is needed on your machin
 The first build downloads dependencies and can take several minutes. Later builds
 reuse Docker's cache.
 
-Copy `.env.local.example` to `.env.local`. Keep local credentials out of git.
+Copy `.env.example` to `.env` if you do not already have one. Keep your existing
+settings when updating an existing `.env`; the actual file stays out of git.
 Generate a unique session secret, for example:
 
 ```sh
@@ -37,13 +38,13 @@ storage. There is no authentication bypass in local mode.
 From the repository root:
 
 ```sh
-docker compose --env-file .env.local config --quiet
-docker compose --env-file .env.local up --build -d
-docker compose --env-file .env.local ps -a
-docker compose --env-file .env.local logs -f app
+docker compose --env-file .env config --quiet
+docker compose --env-file .env up --build -d
+docker compose --env-file .env ps -a
+docker compose --env-file .env logs -f app
 ```
 
-Use `--env-file .env.local` on every Compose command. The file supplies both
+Use `--env-file .env` on every Compose command. The file supplies both
 Compose port/credential substitutions and application environment variables.
 Compose replaces the application's database/storage hostnames with internal
 service names, while signed upload URLs use a browser-accessible localhost host.
@@ -59,7 +60,7 @@ service names, while signed upload URLs use a browser-accessible localhost host.
 
 All published ports bind to the local machine's loopback interface. Use
 `localhost` consistently in the browser, callbacks and storage URLs. Log into the
-MinIO console with `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` from `.env.local`.
+MinIO console with `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` from `.env`.
 The `vendor-documents` bucket is private.
 
 The database initializer enables pgvector, `migrate` applies Alembic migrations,
@@ -68,7 +69,7 @@ The app starts after both jobs succeed. PostgreSQL and storage use named volumes
 Stop the stack without deleting its data:
 
 ```sh
-docker compose --env-file .env.local down
+docker compose --env-file .env down
 ```
 
 Restart with the same `up --build -d` command after pulling code or editing
@@ -82,7 +83,7 @@ also update the host `DATABASE_URL`/storage endpoints and credentials to match.
 Inspect failed startup jobs with:
 
 ```sh
-docker compose --env-file .env.local logs migrate storage-init app
+docker compose --env-file .env logs migrate storage-init app
 ```
 
 ## Run Python with pip
@@ -91,26 +92,28 @@ Use Python 3.12, matching the container and CI. `requirements.txt` is exported f
 `uv.lock` and pins application dependencies, including an editable installation of
 this repository. Run commands from the repository root.
 
-Prepare `.env.local` as above, then start only the supporting services:
+Prepare `.env` as above. For native Python on HTTP localhost, set
+`SESSION_COOKIE_SECURE=false` in `.env`; Compose applies this override itself.
+Hosted deployments keep it `true`. Start only the supporting services:
 
 ```sh
-docker compose --env-file .env.local up -d db minio
-docker compose --env-file .env.local run --rm storage-init
+docker compose --env-file .env up -d db minio
+docker compose --env-file .env run --rm storage-init
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 python -m pip check
-python -m dotenv -f .env.local run -- alembic upgrade head
-python -m uvicorn vendor_risk_analyzer.main:app --host 127.0.0.1 --port 8000 --env-file .env.local
+python -m dotenv -f .env run -- alembic upgrade head
+python -m uvicorn vendor_risk_analyzer.main:app --host 127.0.0.1 --port 8000 --env-file .env
 ```
 
 On Windows PowerShell, create the environment with `py -3.12 -m venv .venv` and
 activate it with `.venv\Scripts\Activate.ps1`. The remaining `python` commands are
 the same. If the Compose app was already started, stop it with
-`docker compose --env-file .env.local stop app` before binding Python to port 8000.
+`docker compose --env-file .env stop app` before binding Python to port 8000.
 
 Alembic reads `DATABASE_URL` from the process environment, so run it through
-`python -m dotenv` as shown. Uvicorn loads `.env.local` for the application.
+`python -m dotenv` as shown. Uvicorn loads `.env` for the application.
 When changing the application port, change the Uvicorn `--port` argument too.
 
 ## Maintainer checks

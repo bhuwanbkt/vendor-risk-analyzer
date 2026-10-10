@@ -14,10 +14,11 @@ app. Data persists across restarts.
 ```sh
 git clone https://github.com/bhuwanbkt/vendor-risk-analyzer.git
 cd vendor-risk-analyzer
-cp .env.local.example .env.local
+cp .env.example .env
 ```
 
-Edit `.env.local`: replace `SESSION_SECRET` and the ZITADEL issuer/client/project
+If you already have `.env`, keep it and update the settings needed for your setup.
+Edit `.env`: replace `SESSION_SECRET` and the ZITADEL issuer/client/project
 placeholders with your own settings. For AI features, add `GEMINI_API_KEY` and set
 `EMBEDDING_WORKER_ENABLED=true`. Register these exact local URLs in a separate
 ZITADEL development application:
@@ -30,8 +31,8 @@ S256 PKCE and token endpoint authentication `none`, and assign users the lowerca
 project roles described below. This app does not configure a client secret.
 
 ```sh
-docker compose --env-file .env.local up --build -d
-docker compose --env-file .env.local logs -f app
+docker compose --env-file .env up --build -d
+docker compose --env-file .env logs -f app
 ```
 
 Open [http://localhost:8000](http://localhost:8000). The public sign-in page and

@@ -1,9 +1,9 @@
-# Local development only. Invoke with --env-file .env.local.
+# Local development only. Invoke with --env-file .env.
 x-app: &app
   build: .
   image: vendor-risk-analyzer:local
   env_file:
-    - .env.local
+    - .env
   environment:
     APP_ENV: development
     PORT: "8000"

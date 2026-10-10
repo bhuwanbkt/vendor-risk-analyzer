@@ -19,7 +19,7 @@ from itsdangerous import TimestampSigner
 
 
 def main():
-    config = dotenv_values(".env.local")
+    config = dotenv_values(".env")
     assert config["APP_ENV"] == "development"
     app_url = f"http://localhost:{config.get('APP_PORT', '8000')}"
     assert urlsplit(app_url).hostname == "localhost"
