@@ -162,7 +162,9 @@ def oidc_provider(security_api, monkeypatch, oidc_signing_key):
 
 def test_login_uses_fixed_callback_state_nonce_and_s256_pkce(oidc_provider):
     provider = oidc_provider
-    response = provider.begin(redirect_uri="https://attacker.example/callback")
+    response = provider.begin(
+        redirect_uri="https://attacker.example/callback", prompt="none"
+    )
     params = provider.authorization
     assert response.headers["location"].startswith(
         provider.issuer + "/oauth/v2/authorize?"
@@ -171,6 +173,7 @@ def test_login_uses_fixed_callback_state_nonce_and_s256_pkce(oidc_provider):
     assert params["redirect_uri"] == provider.settings.zitadel_redirect_uri
     assert set(params["scope"].split()) == {"openid", "profile", "email"}
     assert params["response_type"] == "code"
+    assert params["prompt"] == "login"
     assert params["state"] and params["nonce"]
     assert params["code_challenge_method"] == "S256"
     assert "code_verifier" not in params
@@ -435,7 +438,11 @@ def test_logout_clears_app_session_and_identifies_client_to_zitadel(oidc_provide
     provider.login()
     before = len(provider.requests)
     response = provider.api.client.get(
-        "/auth/logout", params={"post_logout_redirect_uri": "https://attacker.example"}
+        "/auth/logout",
+        params={
+            "post_logout_redirect_uri": "https://attacker.example",
+            "logout_hint": "another-user",
+        },
     )
     assert response.status_code == 303
     target = urlsplit(response.headers["location"])
@@ -444,12 +451,99 @@ def test_logout_clears_app_session_and_identifies_client_to_zitadel(oidc_provide
     assert parse_qs(target.query) == {
         "client_id": [provider.settings.zitadel_client_id],
         "post_logout_redirect_uri": [provider.settings.zitadel_post_logout_uri],
+        "logout_hint": ["oidc-user"],
     }
     assert "vendor_risk_session" not in provider.api.client.cookies
     assert provider.api.client.get("/auth/me").status_code == 401
     assert provider.api.client.get("/api/vendors").status_code == 401
-    assert provider.api.client.get("/dashboard").headers["location"] == "/auth/login"
+    assert provider.api.client.get("/dashboard").headers["location"] == "/sign-in"
+    # Simulate the provider returning to the configured app root after logout.
+    returned = provider.api.client.get("/")
+    assert returned.headers["location"] == "/sign-in"
+    landing = provider.api.client.get(returned.headers["location"])
+    assert landing.status_code == 200
+    assert "Sign in to your workspace" in landing.text
+    assert 'class="app-shell"' not in landing.text
     assert len(provider.requests) == before
+    provider.api.assert_no_work()
+
+
+@pytest.mark.parametrize("login_name", ["viewer", "analyst+test@example.invalid"])
+def test_login_uses_the_entered_account_and_preserves_url_encoding(
+    oidc_provider, login_name
+):
+    provider = oidc_provider
+    response = provider.begin(login_hint=f"  {login_name}  ", prompt="select_account")
+    assert provider.authorization["login_hint"] == login_name
+    assert provider.authorization["prompt"] == "login"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    provider.api.assert_no_work()
+
+
+def test_empty_login_hint_is_not_forwarded(oidc_provider):
+    provider = oidc_provider
+    provider.begin(login_hint="  ")
+    assert "login_hint" not in provider.authorization
+    assert provider.authorization["prompt"] == "login"
+
+
+def test_login_rejects_an_oversized_hint_before_provider_requests(oidc_provider):
+    provider = oidc_provider
+    response = provider.api.client.get("/auth/login", params={"login_hint": "a" * 321})
+    assert response.status_code == 422
+    assert provider.requests == []
+    provider.api.assert_no_work()
+
+
+@pytest.mark.parametrize("login_name", [None, 123, [], {}, "", "   ", "a" * 321])
+def test_logout_ignores_malformed_provider_login_names(oidc_provider, login_name):
+    provider = oidc_provider
+    provider.userinfo["preferred_username"] = login_name
+    provider.login()
+    response = provider.api.client.get("/auth/logout")
+    assert response.status_code == 303
+    assert "logout_hint" not in parse_qs(urlsplit(response.headers["location"]).query)
+    assert provider.api.client.get("/auth/me").status_code == 401
+    provider.api.assert_no_work()
+
+
+def test_login_hint_never_sets_identity_or_grants_the_requested_role(oidc_provider):
+    provider = oidc_provider
+    provider.begin(login_hint="admin")
+    assert provider.callback().status_code == 303
+    identity = provider.api.client.get("/auth/me").json()
+    assert identity["sub"] == provider.subject
+    assert identity["roles"] == ["analyst"]
+    assert provider.api.client.get("/admin/system").status_code == 403
+    provider.api.assert_no_work()
+
+
+def test_oidc_login_without_a_project_role_opens_the_access_screen(oidc_provider):
+    provider = oidc_provider
+    provider.userinfo.pop(provider.role_claim)
+    completed = provider.login()
+    root = provider.api.client.get(completed.headers["location"])
+    assert root.headers["location"] == "/sign-in"
+    page = provider.api.client.get(root.headers["location"])
+    assert page.status_code == 200
+    assert "Your account needs access" in page.text
+    assert "OIDC User" in page.text
+    assert 'action="/auth/login"' in page.text
+    assert 'class="app-shell"' not in page.text
+    assert 'href="/vendors"' not in page.text
+    assert provider.api.client.get("/api/vendors").status_code == 403
+    provider.api.assert_no_work()
+
+
+def test_logout_encodes_the_authenticated_account_name(oidc_provider):
+    provider = oidc_provider
+    provider.userinfo["preferred_username"] = "analyst+test@example.invalid"
+    provider.login()
+    response = provider.api.client.get("/auth/logout")
+    params = parse_qs(urlsplit(response.headers["location"]).query)
+    assert params["logout_hint"] == ["analyst+test@example.invalid"]
+    assert provider.api.client.get("/auth/me").status_code == 401
     provider.api.assert_no_work()
 
 

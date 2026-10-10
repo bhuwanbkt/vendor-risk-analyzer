@@ -19,10 +19,14 @@ The embedding worker is mocked, and outbound socket connections fail the tests.
 | Vendor creation, upload, ingest, assessment creation, chat | Forbidden | Allowed with CSRF | Allowed with CSRF | Forbidden |
 | Chat page | Forbidden | Allowed | Allowed | Forbidden |
 | System page | Forbidden | Forbidden | Allowed | Forbidden |
-| Own profile and `/auth/me` | Allowed | Allowed | Allowed | Allowed |
+| Own profile and `/auth/me` | Allowed | Allowed | Allowed | Access information page and own identity |
 
 Anonymous API requests return 401; private page requests redirect to login. Missing,
 unknown, malformed, and incorrectly cased role claims grant no application access.
+The public `/sign-in` screen renders without database or provider work. Roleless
+accounts receive a separate access message and account-switch form, including on
+direct private pages (403), with no private navigation or data. Their `/profile`
+page uses the same access screen. Account details are escaped in HTML.
 Tests also cover missing or invalid CSRF tokens, expired or modified session cookies,
 secure cookie attributes, and rejection before database or external-service work.
 
@@ -33,7 +37,11 @@ use an in-process HTTPX transport with test-only RSA keys. No identity-provider
 account, credentials, or network connections are needed. Tests reject missing ID
 tokens and invalid or mismatched UserInfo, grant no access for malformed project
 roles, replace the old identity during a new login, rotate CSRF tokens after login,
-and verify local logout plus the encoded ZITADEL client/return-URI redirect.
+and verify local logout plus the encoded ZITADEL client/return-URI/account redirect.
+Sign-in requests force `prompt=login`; entered login names are trimmed, bounded,
+and encoded correctly. Logout ignores caller-supplied account hints and uses the
+authenticated provider login name when present. A simulated provider return to the
+app root opens the public form without starting OIDC again.
 
 Vendor boundaries cover document list filters, vendor/document ID matching before
 completion or ingestion, vendor-specific upload keys, assessment finding separation,

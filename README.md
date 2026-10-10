@@ -18,7 +18,7 @@ Authentication** so UserInfo includes the project's roles.
 | `viewer` | Read vendors, documents, and assessments. |
 | `analyst` | Viewer access plus vendor creation, document upload/processing, assessments, and AI chat. |
 | `admin` | Analyst access plus `/admin/system`. This does not grant ZITADEL administration rights. |
-| No app role | Own profile and `/auth/me`; protected data and system pages are forbidden. |
+| No app role | Access information and sign-in screen, plus own identity at `/auth/me`; protected data and system pages are forbidden. |
 
 Application roles currently apply to all vendors. Per-user vendor ownership and
 tenant separation are not implemented.
@@ -29,11 +29,32 @@ Starting a new login clears the prior local identity, and successful login creat
 a fresh CSRF token. Access and ID tokens are not stored in the application session.
 After changing a user's roles, log out and sign in again to refresh the app session.
 
-Use **Logout** to clear the app session and redirect the browser to ZITADEL's end
-session endpoint. The app supplies its client ID and encoded configured return URI.
-Normal ZITADEL single sign-on still applies: closing a tab does not log you out.
+Anonymous visitors open `/sign-in`, a public introduction and an email/username
+form. Submitting the form starts ZITADEL authentication with `prompt=login` and
+the entered account as `login_hint`; passwords remain on ZITADEL's hosted page.
+Accounts without a recognized app role see an access message and the same form
+for signing in with another account. They see no app navigation, data, or controls.
+Direct private page requests still return 403 before reading data.
+
+Use the visible **Sign out** button to clear the app session and redirect the
+browser to ZITADEL's end-session endpoint. The app supplies its client ID and
+encoded configured return URI, plus the authenticated `preferred_username` as
+`logout_hint` when available (supported by ZITADEL Login UI V2). With the configured
+return URI pointing to the app root, logout returns to `/sign-in` without
+automatically starting another login. The existing root return URI can remain
+registered; no ZITADEL URL change is needed for this flow. See
+[ZITADEL's endpoint parameters](https://zitadel.com/docs/apis/openidoauth/endpoints)
+for hosted login/logout behavior.
+
+Explicit sign-in now requests fresh authentication. Closing a tab does not log you out.
 For an isolated Chrome Incognito test, close every Incognito window before opening
 a fresh one. Browser authentication requires HTTPS because app cookies are Secure.
+
+To validate after deployment: sign out and confirm the public sign-in page opens;
+sign in with another account and check its permissions; sign in with an account
+that has no app role and confirm only the access message/form appear. ZITADEL
+controls the hosted login/logout UI, so provider account selection and session
+termination still need a live browser check.
 
 ## Tests
 

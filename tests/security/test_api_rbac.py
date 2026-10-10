@@ -142,7 +142,7 @@ def test_malformed_session_identity_is_not_authenticated(security_api, user):
     for path in ("/", "/profile"):
         response = security_api.client.get(path)
         assert response.status_code == 302
-        assert response.headers["location"] == "/auth/login"
+        assert response.headers["location"] == "/sign-in"
     security_api.assert_no_work()
 
 

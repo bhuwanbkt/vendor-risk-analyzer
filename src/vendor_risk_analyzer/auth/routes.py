@@ -2,7 +2,7 @@ import secrets
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 
 from vendor_risk_analyzer.auth.dependencies import get_current_user
@@ -18,13 +18,21 @@ settings = get_settings()
 
 
 @router.get("/login")
-async def login(request: Request):
+async def login(request: Request, login_hint: str = Query(default="", max_length=320)):
     # A new login must not retain the previous account while authentication runs.
     request.session.clear()
-    return await oauth.zitadel.authorize_redirect(
+    authorization_params = {"prompt": "login"}
+    if login_hint.strip():
+        authorization_params["login_hint"] = login_hint.strip()
+
+    response = await oauth.zitadel.authorize_redirect(
         request,
         settings.zitadel_redirect_uri,
+        **authorization_params,
     )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 @router.get("/callback")
@@ -132,14 +140,20 @@ async def callback(request: Request):
 
 @router.get("/logout")
 async def logout(request: Request):
+    user = request.session.get("user")
     request.session.clear()
 
-    logout_params = urlencode(
-        {
-            "client_id": settings.zitadel_client_id,
-            "post_logout_redirect_uri": settings.zitadel_post_logout_uri,
-        }
-    )
+    params = {
+        "client_id": settings.zitadel_client_id,
+        "post_logout_redirect_uri": settings.zitadel_post_logout_uri,
+    }
+    # Login UI V2 can select the account to sign out using its verified login name.
+    if isinstance(user, dict):
+        login_name = user.get("preferred_username")
+        if isinstance(login_name, str) and 0 < len(login_name.strip()) <= 320:
+            params["logout_hint"] = login_name.strip()
+
+    logout_params = urlencode(params)
     logout_url = (
         f"{settings.zitadel_issuer.rstrip('/')}"
         "/oidc/v1/end_session"

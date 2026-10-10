@@ -220,9 +220,47 @@ def page_context(
 
 def login_redirect():
     return RedirectResponse(
-        url="/auth/login",
+        url="/sign-in",
         status_code=302,
     )
+
+
+def has_application_access(user: dict) -> bool:
+    return bool(get_user_roles(user).intersection({"viewer", "analyst", "admin"}))
+
+
+def sign_in_response(
+    request: Request, user: dict | None = None, *, status_code: int = 200
+):
+    return templates.TemplateResponse(
+        request=request,
+        name="pages/sign_in.html",
+        context={
+            "request": request,
+            "user": user,
+            "display_name": user_display_name(user) if user else "",
+            "page_title": "Access needed" if user else "Sign in",
+        },
+        status_code=status_code,
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
+
+
+def page_access_response(request: Request, user: dict | None, *allowed_roles: str):
+    if user is None:
+        return login_redirect()
+    if not has_application_access(user):
+        return sign_in_response(request, user, status_code=403)
+    require_page_roles(user, *allowed_roles)
+    return None
+
+
+@router.get("/sign-in", response_class=HTMLResponse)
+async def sign_in_page(request: Request):
+    user = get_session_user(request)
+    if user and has_application_access(user):
+        return RedirectResponse(url="/dashboard", status_code=302)
+    return sign_in_response(request, user)
 
 
 # ============================================================
@@ -238,7 +276,7 @@ async def root(
         request
     )
 
-    if user is None:
+    if user is None or not has_application_access(user):
         return login_redirect()
 
     return RedirectResponse(
@@ -266,10 +304,8 @@ async def dashboard_page(
         request
     )
 
-    if user is None:
-        return login_redirect()
-
-    require_page_roles(user, "viewer", "analyst", "admin")
+    if response := page_access_response(request, user, "viewer", "analyst", "admin"):
+        return response
 
     vendor_count = (
         await db.scalar(
@@ -389,10 +425,8 @@ async def vendors_page(
         request
     )
 
-    if user is None:
-        return login_redirect()
-
-    require_page_roles(user, "viewer", "analyst", "admin")
+    if response := page_access_response(request, user, "viewer", "analyst", "admin"):
+        return response
 
     result = await db.execute(
         select(
@@ -442,10 +476,8 @@ async def documents_page(
         request
     )
 
-    if user is None:
-        return login_redirect()
-
-    require_page_roles(user, "viewer", "analyst", "admin")
+    if response := page_access_response(request, user, "viewer", "analyst", "admin"):
+        return response
 
     result = await db.execute(
         select(
@@ -495,10 +527,8 @@ async def assessments_page(
         request
     )
 
-    if user is None:
-        return login_redirect()
-
-    require_page_roles(user, "viewer", "analyst", "admin")
+    if response := page_access_response(request, user, "viewer", "analyst", "admin"):
+        return response
 
     vendor_result = await db.execute(
         select(
@@ -650,10 +680,8 @@ async def assessment_detail_page(
         request
     )
 
-    if user is None:
-        return login_redirect()
-
-    require_page_roles(user, "viewer", "analyst", "admin")
+    if response := page_access_response(request, user, "viewer", "analyst", "admin"):
+        return response
 
     assessment = await db.get(
         Assessment,
@@ -739,15 +767,8 @@ async def chat_page(
         request
     )
 
-    if user is None:
-        return login_redirect()
-
-
-    require_page_roles(
-        user,
-        "analyst",
-        "admin",
-    )
+    if response := page_access_response(request, user, "analyst", "admin"):
+        return response
 
 
     result = await db.execute(
@@ -798,6 +819,9 @@ async def profile_page(
     if user is None:
         return login_redirect()
 
+    if not has_application_access(user):
+        return sign_in_response(request, user)
+
 
     return templates.TemplateResponse(
         request=request,
@@ -829,14 +853,8 @@ async def system_page(
         request
     )
 
-    if user is None:
-        return login_redirect()
-
-
-    require_page_roles(
-        user,
-        "admin",
-    )
+    if response := page_access_response(request, user, "admin"):
+        return response
 
 
     system_info = {
