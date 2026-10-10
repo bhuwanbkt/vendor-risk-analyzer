@@ -33,6 +33,11 @@ jobs:
       - name: Sync locked application dependencies
         run: uv sync --frozen --no-dev
 
+      - name: Check exported pip requirements
+        run: |
+          uv export --frozen --no-dev --no-hashes --format requirements-txt --output-file requirements.txt --quiet
+          git diff --exit-code -- requirements.txt
+
       - name: Compile Python sources
         run: uv run python -m compileall -q src tests scripts
 
@@ -53,3 +58,42 @@ jobs:
           path: test-results/
           retention-days: 7
           if-no-files-found: warn
+
+  local-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: python -m pip install --disable-pip-version-check uv
+      - name: Prepare disposable local settings
+        run: |
+          cp .env.example .env
+          python - <<'PY'
+          from pathlib import Path
+          path = Path(".env")
+          text = path.read_text().replace("API_BEARER_ENABLED=false", "API_BEARER_ENABLED=true")
+          path.write_text(text.replace("MCP_ENABLED=false", "MCP_ENABLED=true"))
+          PY
+      - name: Validate Compose configuration
+        run: docker compose --env-file .env config --quiet
+      - name: Build and start local services
+        run: docker compose --env-file .env up --build --detach --wait --wait-timeout 180
+      - name: Exercise PostgreSQL and private object storage
+        run: uv run --no-project --python 3.12 --with itsdangerous --with python-dotenv python tests/local_runtime_smoke.py
+      - name: Validate pip requirements
+        run: |
+          python -m venv /tmp/vendor-risk-pip
+          /tmp/vendor-risk-pip/bin/python -m pip install --quiet -r requirements.txt
+          /tmp/vendor-risk-pip/bin/python -m pip check
+      - name: Show local service logs on failure
+        if: failure()
+        run: docker compose --env-file .env logs --no-color --tail=100
+      - name: Remove disposable services and volumes
+        if: always()
+        run: docker compose --env-file .env down --volumes --remove-orphans

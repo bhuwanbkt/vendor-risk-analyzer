@@ -9,11 +9,7 @@ from sqlalchemy.pool import NullPool
 from vendor_risk_analyzer.db.url import (
     get_database_url,
 )
-from vendor_risk_analyzer.embeddings.service import (
-    EmbeddingError,
-    EmbeddingService,
-)
-from vendor_risk_analyzer.embeddings.store import (
+from vendor_risk_analyzer.embeddings.repository import (
     build_embedding_title,
     count_embeddings,
     fetch_chunks,
@@ -22,7 +18,12 @@ from vendor_risk_analyzer.embeddings.store import (
     mark_document_failed,
     normalize_metadata,
     save_embedding,
+    update_document_status,
     verify_embedding,
+)
+from vendor_risk_analyzer.embeddings.service import (
+    EmbeddingError,
+    EmbeddingService,
 )
 
 

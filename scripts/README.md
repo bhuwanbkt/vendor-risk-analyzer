@@ -2,22 +2,22 @@
 
 This directory is intentionally separate from the Pytest suite.
 
-The automatic worker and the backfill command share storage and document
-lifecycle helpers in `vendor_risk_analyzer.embeddings.store`. Runtime code
-does not import operational scripts or require the repository as its working
-directory.
-
 ## Automatic worker in the application service
+
+The automatic worker and backfill command share storage and document
+lifecycle helpers in `vendor_risk_analyzer.embeddings.repository`.
 
 `EMBEDDING_WORKER_ENABLED` defaults to `true`. Set it to `false` to pause
 automatic processing without opening database or Gemini clients for the worker.
+The local `.env.example` disables it until a Gemini API key is configured.
 
 Transient database failures during startup recovery or polling are retried
 after `EMBEDDING_WORKER_POLL_SECONDS`. Stale-document recovery runs at startup
-and every `EMBEDDING_WORKER_STALE_MINUTES`, so recently interrupted documents
-can be recovered later without restarting the service. Processing renews the
-document timestamp before each batch to keep active claims fresh. The worker
-remains in the FastAPI service and does not use either Northflank Job slot.
+and every `EMBEDDING_WORKER_STALE_MINUTES`, so interrupted documents can be
+recovered later without restarting the service. Processing renews the document
+timestamp before each batch to keep active claims fresh. Database connections
+are disposed even if embedding-client initialization or cleanup fails.
+The worker runs in the FastAPI service and does not use a Northflank Job slot.
 
 ## Northflank Job 1 — database migrations
 
@@ -91,3 +91,15 @@ or deliberate troubleshooting, not the reusable Northflank job.
 
 Automated unit, security, and regression tests belong in `tests/`.
 They run in GitHub Actions and do not consume Northflank Job slots.
+
+## Dependency direction
+
+Production application code under `src/vendor_risk_analyzer/`
+must not import from `scripts/`.
+
+Shared database and embedding lifecycle logic lives in the
+application package. Operational scripts are thin clients that
+import and invoke that application-owned logic.
+
+This keeps deployment behavior independent from maintenance tooling
+and lets CI catch accidental dependency inversions.

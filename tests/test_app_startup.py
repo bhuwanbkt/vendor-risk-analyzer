@@ -9,6 +9,10 @@ import textwrap
 def test_application_starts_outside_repository_without_cloud_calls(tmp_path) -> None:
     env = {
         **os.environ,
+        "APP_ENV": "test",
+        "SESSION_COOKIE_SECURE": "true",
+        "API_BEARER_ENABLED": "false",
+        "MCP_ENABLED": "false",
         "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/test",
         "ZITADEL_ISSUER": "https://identity.example.invalid",
         "ZITADEL_CLIENT_ID": "test-client",
@@ -42,7 +46,12 @@ def test_application_starts_outside_repository_without_cloud_calls(tmp_path) -> 
 
             response = client.get("/", follow_redirects=False)
             assert response.status_code == 302
-            assert response.headers["location"] == "/auth/login"
+            assert response.headers["location"] == "/sign-in"
+            response = client.get("/sign-in")
+            assert response.status_code == 200
+            assert "Sign in to your workspace" in response.text
+            assert 'action="/auth/login"' in response.text
+            assert 'class="app-shell"' not in response.text
 
             assert client.get("/api/vendors").status_code == 401
             assert client.get("/static/css/app.css").status_code == 200

@@ -2,6 +2,7 @@ from functools import lru_cache
 
 import boto3
 from botocore.exceptions import ClientError
+from botocore.config import Config
 
 from vendor_risk_analyzer.config import get_settings
 
@@ -11,17 +12,29 @@ settings = get_settings()
 
 @lru_cache
 def get_storage_client():
+    return _storage_client(settings.object_storage_endpoint)
+
+
+def _storage_client(endpoint: str):
     return boto3.client(
         "s3",
-        endpoint_url=settings.object_storage_endpoint,
+        endpoint_url=endpoint,
         region_name=settings.object_storage_region,
-        aws_access_key_id=(
-            settings.object_storage_access_key_id
-        ),
-        aws_secret_access_key=(
-            settings.object_storage_secret_access_key
+        aws_access_key_id=(settings.object_storage_access_key_id),
+        aws_secret_access_key=(settings.object_storage_secret_access_key),
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": settings.object_storage_addressing_style},
         ),
     )
+
+
+@lru_cache
+def get_upload_client():
+    public_endpoint = settings.object_storage_public_endpoint
+    if not public_endpoint or public_endpoint == settings.object_storage_endpoint:
+        return get_storage_client()
+    return _storage_client(public_endpoint)
 
 
 def generate_upload_url(
@@ -31,7 +44,7 @@ def generate_upload_url(
     expires_in: int = 300,
 ) -> str:
 
-    client = get_storage_client()
+    client = get_upload_client()
 
     return client.generate_presigned_url(
         ClientMethod="put_object",
@@ -57,16 +70,13 @@ def get_object_metadata(
         )
 
     except ClientError as exc:
-        status_code = (
-            exc.response
-            .get("ResponseMetadata", {})
-            .get("HTTPStatusCode")
-        )
+        status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
 
         if status_code == 404:
             return None
 
         raise
+
 
 def download_object(
     object_key: str,

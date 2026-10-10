@@ -1,32 +1,6 @@
 from __future__ import annotations
 
-
-def normalize_roles(
-    user: dict,
-) -> set[str]:
-    raw_roles = user.get(
-        "roles",
-        [],
-    )
-
-    if isinstance(
-        raw_roles,
-        str,
-    ):
-        return {
-            raw_roles.lower()
-        }
-
-    if isinstance(
-        raw_roles,
-        list,
-    ):
-        return {
-            str(role).lower()
-            for role in raw_roles
-        }
-
-    return set()
+from vendor_risk_analyzer.auth.dependencies import get_user_roles
 
 
 def build_navigation(
@@ -39,9 +13,9 @@ def build_navigation(
     not included in navigation at all.
     """
 
-    roles = normalize_roles(
-        user
-    )
+    roles = get_user_roles(user)
+    if not roles.intersection({"viewer", "analyst", "admin"}):
+        return []
 
     navigation = [
         {
@@ -101,11 +75,8 @@ def build_navigation(
         )
 
 
-    # Do NOT add MCP yet.
-    #
-    # Until the MCP endpoint and JWT/JWKS
-    # authorization layer are complete,
-    # users should not see an MCP menu item.
+    # MCP is a protocol endpoint for external clients. Its setup is documented
+    # separately; it has no browser page to add to this navigation.
 
 
     return navigation

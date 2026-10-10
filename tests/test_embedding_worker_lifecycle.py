@@ -58,6 +58,30 @@ def test_disabled_worker_does_not_create_external_clients(
     worker.recover_stale_documents.assert_not_called()
 
 
+@pytest.mark.parametrize("value", ["invalid", "", "2"])
+def test_invalid_worker_flag_is_rejected_before_creating_clients(
+    monkeypatch, runtime, value
+) -> None:
+    monkeypatch.setenv("EMBEDDING_WORKER_ENABLED", value)
+
+    with pytest.raises(ValueError, match="must be a boolean"):
+        asyncio.run(worker.run_embedding_worker())
+
+    runtime.engine_factory.assert_not_called()
+    runtime.service_factory.assert_not_called()
+
+
+def test_worker_remains_enabled_when_flag_is_unset(monkeypatch, runtime) -> None:
+    monkeypatch.delenv("EMBEDDING_WORKER_ENABLED")
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(worker.run_embedding_worker())
+
+    worker.recover_stale_documents.assert_awaited_once()
+    runtime.service.close.assert_awaited_once()
+    runtime.engine.dispose.assert_awaited_once()
+
+
 def test_startup_database_failure_is_retried_before_processing(
     monkeypatch, runtime
 ) -> None:

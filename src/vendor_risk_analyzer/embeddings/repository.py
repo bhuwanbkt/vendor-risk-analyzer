@@ -1,5 +1,3 @@
-"""Embedding storage and document lifecycle shared by runtime and ops."""
-
 from __future__ import annotations
 
 import json
@@ -626,3 +624,5 @@ async def count_embeddings(
             row["remaining_chunks"]
         ),
     )
+
+

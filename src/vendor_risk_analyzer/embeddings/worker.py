@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
-from vendor_risk_analyzer.embeddings.store import (
+from vendor_risk_analyzer.embeddings.repository import (
     build_embedding_title,
     fetch_chunks,
     finalize_document,

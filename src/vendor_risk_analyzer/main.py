@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from contextlib import (
+    AsyncExitStack,
     asynccontextmanager,
     suppress,
 )
@@ -54,6 +55,7 @@ from vendor_risk_analyzer.api.chat import (
 from vendor_risk_analyzer.auth.routes import (
     router as auth_router,
 )
+from vendor_risk_analyzer.auth.bearer import ApiBearerAuthenticationMiddleware
 
 
 # ============================================================
@@ -95,81 +97,35 @@ BASE_DIR = (
 
 settings = get_settings()
 
+mcp_application = None
+if settings.mcp_enabled:
+    from vendor_risk_analyzer.mcp.server import create_mcp_application
+
+    mcp_application = create_mcp_application(settings)
+
 
 # ============================================================
 # APPLICATION LIFESPAN
 # ============================================================
 
 @asynccontextmanager
-async def lifespan(
-    app: FastAPI,
-):
-    """
-    FastAPI application lifecycle.
-
-    The automatic embedding worker runs
-    in the same process/container as the
-    FastAPI application.
-
-    This keeps the current low-cost
-    architecture:
-
-        FastAPI
-            +
-        embedding worker
-
-    inside the same Northflank service.
-
-    No additional:
-        - worker service
-        - Redis
-        - Celery
-        - queue service
-        - Northflank job
-
-    is required.
-    """
-
-    # --------------------------------------------------------
-    # Start automatic embedding worker
-    # --------------------------------------------------------
-
-    embedding_worker_task = (
-        asyncio.create_task(
-            run_embedding_worker(),
-            name=(
-                "automatic-embedding-worker"
-            ),
+async def lifespan(app: FastAPI):
+    """Run MCP transport and the automatic embedding worker in this process."""
+    async with AsyncExitStack() as stack:
+        if mcp_application is not None:
+            await stack.enter_async_context(
+                mcp_application.app.router.lifespan_context(mcp_application.app)
+            )
+        embedding_worker_task = asyncio.create_task(
+            run_embedding_worker(), name="automatic-embedding-worker"
         )
-    )
-
-
-    try:
-        # ----------------------------------------------------
-        # FastAPI runs while this context is active.
-        # ----------------------------------------------------
-
-        yield
-
-
-    finally:
-        # ----------------------------------------------------
-        # Graceful application shutdown.
-        #
-        # worker.py already handles CancelledError
-        # and performs its own cleanup.
-        # ----------------------------------------------------
-
-        if (
-            not embedding_worker_task.done()
-        ):
-            embedding_worker_task.cancel()
-
-
-        with suppress(
-            asyncio.CancelledError
-        ):
-            await embedding_worker_task
+        try:
+            yield
+        finally:
+            if not embedding_worker_task.done():
+                embedding_worker_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await embedding_worker_task
 
 
 # ============================================================
@@ -225,8 +181,10 @@ app.add_middleware(
 
     same_site="lax",
 
-    https_only=True,
+    https_only=settings.session_cookie_secure,
 )
+
+app.add_middleware(ApiBearerAuthenticationMiddleware)
 
 
 # ============================================================
@@ -337,3 +295,8 @@ app.mount(
 
     name="static",
 )
+
+# Root mounting preserves the SDK's /mcp and RFC 9728 discovery paths.
+# Existing API/web/static routes are matched before the MCP app.
+if mcp_application is not None:
+    app.mount("/", mcp_application.app, name="mcp")
