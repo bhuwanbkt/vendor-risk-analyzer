@@ -112,6 +112,30 @@ def test_northstar_gap_and_explicit_risk_merge() -> None:
         "risk",
     }
 
+    assert (
+        result.summary
+        != analysis.summary
+    )
+
+    assert (
+        "1 normalized finding"
+        in result.summary
+    )
+
+    assert (
+        "Unvalidated Recovery Procedures "
+        "Due to Pending Full "
+        "Disaster-Recovery Exercise"
+        in result.summary
+    )
+
+    assert (
+        "Evidence of Completed Full "
+        "2026 Technical Recovery "
+        "Exercise Not Available"
+        not in result.summary
+    )
+
 
 def test_unrelated_same_category_findings_stay_separate() -> None:
     analysis = EvidenceAnalysis(
@@ -157,6 +181,11 @@ def test_unrelated_same_category_findings_stay_separate() -> None:
     )
 
     assert len(result.findings) == 2
+
+    assert (
+        result.summary
+        == analysis.summary
+    )
 
 
 def test_similar_findings_from_different_documents_stay_separate() -> None:
