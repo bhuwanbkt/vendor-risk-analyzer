@@ -27,6 +27,14 @@ logger = logging.getLogger(
     "uvicorn.error"
 )
 
+INSUFFICIENT_EVIDENCE_ANSWER = (
+    "I could not find enough vendor evidence to answer that question."
+)
+UNSUPPORTED_ANSWER = (
+    "I couldn't provide an answer supported by the selected vendor's documents. "
+    "Try asking about a specific policy or requirement."
+)
+
 
 class ChatServiceError(
     RuntimeError
@@ -139,11 +147,7 @@ class ChatService:
         if not retrieval_results:
             return ChatResponse(
                 vendor_id=vendor_id,
-                answer=(
-                    "I could not find enough "
-                    "vendor evidence to answer "
-                    "that question."
-                ),
+                answer=INSUFFICIENT_EVIDENCE_ANSWER,
                 model=self.model,
                 sources=[],
             )
@@ -213,8 +217,9 @@ SECURITY RULES:
 3. Do not use knowledge that is not supported by the evidence.
 4. Do not invent policies, controls, dates, certifications,
    obligations, or security claims.
-5. If the evidence is insufficient, say so clearly.
+5. If the evidence is insufficient, use the exact fallback below.
 6. Cite factual claims using source markers such as [S1].
+   This includes claims about missing requirements or conflicts.
 7. Only cite source markers supplied below.
 8. If sources conflict, explain the conflict instead of choosing
    one silently.
@@ -236,7 +241,11 @@ USER QUESTION:
 
 {clean_question}
 
-Return a grounded answer with inline source citations.
+Return a grounded answer with inline source citations. If the supplied
+evidence cannot answer the question, return exactly this sentence, without
+adding any claims or citations:
+
+{INSUFFICIENT_EVIDENCE_ANSWER}
 """.strip()
 
 
@@ -245,45 +254,35 @@ Return a grounded answer with inline source citations.
         )
 
 
-        cited_numbers = {
-            int(value)
-            for value
-            in re.findall(
-                r"\[S(\d+)\]",
-                answer,
-            )
-        }
-
-
-        maximum_source = len(
-            retrieval_results
-        )
-
-
-        invalid_citations = {
-            value
-            for value
-            in cited_numbers
-            if (
-                value < 1
-                or value
-                > maximum_source
-            )
-        }
-
-
-        if invalid_citations:
-            raise ChatGroundingError(
-                "Model returned an invalid "
-                "source citation."
-            )
-
-
-        if not cited_numbers:
-            raise ChatGroundingError(
-                "Model answer did not include "
-                "evidence citations."
-            )
+        cited_numbers: set[int] = set()
+        for attempt in range(2):
+            # Only this exact, claim-free refusal may omit citations.
+            if answer == INSUFFICIENT_EVIDENCE_ANSWER:
+                break
+            try:
+                cited_numbers = self._validate_citations(
+                    answer, len(retrieval_results)
+                )
+                break
+            except ChatGroundingError as exc:
+                # Log the validation reason, never the prompt or model answer.
+                logger.warning(
+                    "Vendor chat citation validation failed. "
+                    "vendor_id=%s attempt=%s reason=%s",
+                    vendor_id, attempt + 1, str(exc),
+                )
+                if attempt == 1:
+                    answer = UNSUPPORTED_ANSWER
+                    break
+                answer = await self._generate(
+                    prompt
+                    + "\n\nYour previous response failed source citation validation. "
+                    "Generate a fresh answer from the supplied evidence. "
+                    f"Only use source markers [S1] through [S{len(retrieval_results)}]. "
+                    "Cite factual claims, including claims that no conflicts were "
+                    "found in the supplied evidence. If you cannot support an "
+                    "answer, return only the exact fallback sentence above."
+                )
 
 
         sources = []
@@ -338,6 +337,19 @@ Return a grounded answer with inline source citations.
             model=self.model,
             sources=sources,
         )
+
+    @staticmethod
+    def _validate_citations(answer: str, maximum_source: int) -> set[int]:
+        cited_numbers = {
+            int(value) for value in re.findall(r"\[S(\d+)\]", answer)
+        }
+        if any(value < 1 or value > maximum_source for value in cited_numbers):
+            raise ChatGroundingError("Model returned an invalid source citation.")
+        if not cited_numbers:
+            raise ChatGroundingError(
+                "Model answer did not include evidence citations."
+            )
+        return cited_numbers
 
 
     async def _generate(

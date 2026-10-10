@@ -437,6 +437,41 @@ def test_chat_grounding_failure_is_safe_and_closes_resources(mcp_api):
     mcp_api.api.cloud.embedding_factory.return_value.close.assert_awaited_once()
 
 
+@pytest.mark.parametrize("repaired", [True, False])
+def test_mcp_chat_handles_citation_failures_with_real_service(mcp_api, monkeypatch, repaired):
+    from vendor_risk_analyzer.chat.service import ChatService, UNSUPPORTED_ANSWER
+    from vendor_risk_analyzer.mcp import server
+    from vendor_risk_analyzer.retrieval.service import RetrievalResult
+
+    vendor_id = mcp_api.api.ids["vendor_a"]
+    retrieval = AsyncMock(return_value=[RetrievalResult(
+        chunk_id="test-chunk", document_id=mcp_api.api.ids["document_a"],
+        sequence=1, content="Notify customers of an incident.", metadata={},
+        cosine_distance=0.2, similarity=0.8,
+    )])
+    cited = "The document requires notification [S1]."
+    generation = AsyncMock(side_effect=[
+        "Private uncited answer.", cited if repaired else "Private uncited answer [S99].",
+    ])
+    monkeypatch.setattr(server, "ChatService", ChatService)
+    monkeypatch.setattr(server.SemanticRetriever, "search", retrieval)
+    monkeypatch.setattr(ChatService, "_generate", generation)
+
+    data = result(mcp_api.call("ask_vendor", {
+        "vendor_id": vendor_id, "question": "What is required?",
+    }, roles=["analyst"]))
+
+    assert not data.get("isError", False)
+    answer = data["structuredContent"]
+    assert answer["vendor_id"] == vendor_id
+    assert answer["answer"] == (cited if repaired else UNSUPPORTED_ANSWER)
+    assert len(answer["sources"]) == int(repaired)
+    assert "Private uncited answer" not in json.dumps(data)
+    assert retrieval.await_args.kwargs["vendor_id"] == vendor_id
+    assert generation.await_count == 2
+    mcp_api.api.cloud.embedding_factory.return_value.close.assert_awaited_once()
+
+
 def test_database_failure_does_not_expose_sql_or_credentials(mcp_api, monkeypatch):
     monkeypatch.setattr(mcp_api.api.db, "execute", AsyncMock(side_effect=OperationalError(
         "private SQL", {}, Exception("database-password")

@@ -55,6 +55,11 @@ assessment ID. Every vendor-specific query stays within that vendor.
 question is limited to 2,000 characters. It does not save a chat history or create
 an assessment. Its tool annotation indicates an external service call and possible
 different answers on repeated calls. The other five tools only read saved data.
+Chat retries once when a model reply omits citations or cites a source outside
+the retrieved evidence. If the second reply also fails validation, it returns a
+fixed unsupported-answer message with no sources; the rejected model text is
+never returned. Insufficient evidence also produces a fixed refusal with no
+sources. Provider failures still return a tool error.
 MCP has no upload, creation, deletion, arbitrary SQL, or arbitrary URL tools.
 
 Application roles currently grant access to all vendors. Vendor filtering keeps

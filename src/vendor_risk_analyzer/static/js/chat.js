@@ -200,6 +200,7 @@ document
                 () => {
                     questionInput.value =
                         button.textContent
+                            .replace(/\s+/g, " ")
                             .trim();
 
                     questionInput.focus();
