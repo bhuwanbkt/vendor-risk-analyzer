@@ -49,7 +49,7 @@ def mcp_api(bearer_api, monkeypatch):
             )
 
             def headers(roles=("viewer",), **kwargs):
-                updates = {"azp": "mcp-test-client", **kwargs.pop("updates", {})}
+                updates = {"client_id": "mcp-test-client", **kwargs.pop("updates", {})}
                 return {
                     "Accept": "application/json, text/event-stream",
                     "MCP-Protocol-Version": "2025-11-25",
@@ -190,12 +190,42 @@ def test_official_sdk_client_example_works_over_authenticated_http(mcp_api):
 
 
 @pytest.mark.parametrize("updates,omit", [
+    ({}, ()),
+    ({"azp": "mcp-test-client"}, ("client_id",)),
+    ({"azp": "mcp-test-client"}, ()),
+], ids=["client-id", "legacy-azp", "matching-claims"])
+def test_signed_oauth_client_claims_authenticate_mcp(mcp_api, updates, omit):
+    from vendor_risk_analyzer.config import get_settings
+    from vendor_risk_analyzer.mcp.server import ZitadelTokenVerifier
+
+    headers = mcp_api.headers(updates=updates, omit=omit)
+    response = mcp_api.client.post(
+        "/mcp", headers=headers,
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+    )
+    assert len(result(response)["tools"]) == 6
+    token = headers["Authorization"].split(" ", 1)[1]
+    verified = asyncio.run(ZitadelTokenVerifier(get_settings()).verify_token(token))
+    assert verified is not None
+    assert verified.client_id == "mcp-test-client"
+    mcp_api.api.assert_no_work()
+
+
+@pytest.mark.parametrize("updates,omit", [
     ({"aud": ["another-project"]}, ()),
     ({"iss": "https://attacker.example"}, ()),
     ({"exp": 1}, ()),
     ({"nonce": "id-token"}, ("jti",)),
     ({"azp": ""}, ()),
     ({"azp": None}, ()),
+    ({"client_id": ""}, ()),
+    ({"client_id": "   "}, ()),
+    ({"client_id": None}, ()),
+    ({"client_id": 123}, ()),
+    ({"client_id": ["mcp-test-client"]}, ()),
+    ({"azp": "another-client"}, ()),
+    ({"azp": "mcp-test-client", "client_id": ""}, ()),
+    ({}, ("client_id", "azp")),
 ])
 def test_invalid_signed_tokens_cannot_reach_tools(mcp_api, updates, omit):
     response = mcp_api.client.post(
