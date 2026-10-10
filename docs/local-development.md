@@ -78,7 +78,7 @@ volume's password. The example database password is URL-safe; use URL-safe
 characters if changing `POSTGRES_PASSWORD` in this local Compose setup.
 
 If a port is occupied, edit its `*_PORT` setting. Update callback/logout URLs and
-their ZITADEL registrations when changing `APP_PORT`. For the pip setup below,
+their ZITADEL registrations when changing `APP_PORT`. For native Python below,
 also update the host `DATABASE_URL`/storage endpoints and credentials to match.
 Inspect failed startup jobs with:
 
@@ -86,11 +86,12 @@ Inspect failed startup jobs with:
 docker compose --env-file .env logs migrate storage-init app
 ```
 
-## Run Python with pip
+## Run Python with uv
 
-Use Python 3.12, matching the container and CI. `requirements.txt` is exported from
-`uv.lock` and pins application dependencies, including an editable installation of
-this repository. Run commands from the repository root.
+uv is the project's primary dependency manager. Install
+[uv](https://docs.astral.sh/uv/getting-started/installation/) and use Python 3.12,
+matching the container and CI. `uv sync --frozen` installs the versions in
+`uv.lock`. Run commands from the repository root.
 
 Prepare `.env` as above. For native Python on HTTP localhost, set
 `SESSION_COOKIE_SECURE=false` in `.env`; Compose applies this override itself.
@@ -99,22 +100,27 @@ Hosted deployments keep it `true`. Start only the supporting services:
 ```sh
 docker compose --env-file .env up -d db minio
 docker compose --env-file .env run --rm storage-init
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m pip check
-python -m dotenv -f .env run -- alembic upgrade head
-python -m uvicorn vendor_risk_analyzer.main:app --host 127.0.0.1 --port 8000 --env-file .env
+uv sync --python 3.12 --frozen --no-dev
+uv run --python 3.12 python -m dotenv -f .env run -- alembic upgrade head
+uv run --python 3.12 uvicorn vendor_risk_analyzer.main:app --host 127.0.0.1 --port 8000 --env-file .env
 ```
 
-On Windows PowerShell, create the environment with `py -3.12 -m venv .venv` and
-activate it with `.venv\Scripts\Activate.ps1`. The remaining `python` commands are
-the same. If the Compose app was already started, stop it with
+uv creates and uses `.venv` automatically; activation is unnecessary. The same
+commands work in Windows PowerShell. If the Compose app was already started, stop it with
 `docker compose --env-file .env stop app` before binding Python to port 8000.
 
 Alembic reads `DATABASE_URL` from the process environment, so run it through
 `python -m dotenv` as shown. Uvicorn loads `.env` for the application.
 When changing the application port, change the Uvicorn `--port` argument too.
+
+## Optional pip compatibility
+
+`requirements.txt` is an export of `uv.lock` for people whose environment requires
+pip. It does not replace the uv setup. With a separate Python 3.12 virtual
+environment activated, use `python -m pip install -r requirements.txt` and
+`python -m pip check`. Run migrations and Uvicorn with that environment's `python`
+using the same `.env` settings. Maintain dependencies in `pyproject.toml` and
+`uv.lock`, then regenerate the export rather than editing it directly.
 
 ## Maintainer checks
 
@@ -127,5 +133,6 @@ uv run --python 3.12 --with pytest pytest -q
 
 The CI Compose smoke script uses signed test identities and a disposable database
 to verify RBAC, private signed uploads, internal downloads, ingestion and
-persistence. It does not test actual ZITADEL login or Gemini output. Check those
+persistence. CI also enables MCP to check startup, OAuth discovery, and rejection
+of anonymous/cookie requests. It does not test actual ZITADEL login or Gemini output. Check those
 manually with your own development accounts and sample vendor documents.

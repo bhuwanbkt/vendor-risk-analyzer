@@ -75,11 +75,8 @@ def build_navigation(
         )
 
 
-    # Do NOT add MCP yet.
-    #
-    # Until the MCP endpoint and JWT/JWKS
-    # authorization layer are complete,
-    # users should not see an MCP menu item.
+    # MCP is a protocol endpoint for external clients. Its setup is documented
+    # separately; it has no browser page to add to this navigation.
 
 
     return navigation

@@ -11,10 +11,17 @@ anyio==4.15.1
     # via
     #   google-genai
     #   httpx
+    #   httpx2
+    #   mcp
+    #   sse-starlette
     #   starlette
     #   watchfiles
 asyncpg==0.31.0
     # via vendor-risk-analyzer
+attrs==26.1.0
+    # via
+    #   jsonschema
+    #   referencing
 authlib==1.8.0
     # via vendor-risk-analyzer
 boto3==1.43.108
@@ -39,6 +46,7 @@ cryptography==50.0.2
     #   authlib
     #   google-auth
     #   joserfc
+    #   pyjwt
 distro==1.9.0
     # via google-genai
 et-xmlfile==2.0.0
@@ -54,19 +62,27 @@ greenlet==3.5.6
 h11==0.16.0
     # via
     #   httpcore
+    #   httpcore2
     #   uvicorn
 httpcore==1.0.9
     # via httpx
+httpcore2==2.13.1 ; sys_platform != 'emscripten'
+    # via httpx2
 httptools==0.8.0
     # via uvicorn
 httpx==0.28.1
     # via
     #   google-genai
     #   vendor-risk-analyzer
+httpx2==2.13.1
+    # via mcp
+httpx2-jsfetch==1.0 ; python_full_version >= '3.12' and sys_platform == 'emscripten'
+    # via httpx2
 idna==3.20
     # via
     #   anyio
     #   httpx
+    #   httpx2
     #   requests
 itsdangerous==2.2.0
     # via vendor-risk-analyzer
@@ -80,6 +96,10 @@ joserfc==1.7.5
     # via
     #   authlib
     #   vendor-risk-analyzer
+jsonschema==4.26.0
+    # via mcp
+jsonschema-specifications==2025.9.1
+    # via jsonschema
 lxml==6.1.3
     # via python-docx
 mako==1.4.3
@@ -88,10 +108,16 @@ markupsafe==3.0.4
     # via
     #   jinja2
     #   mako
+mcp==2.3.0
+    # via vendor-risk-analyzer
+mcp-types==2.3.0
+    # via mcp
 openpyxl==3.1.5
     # via vendor-risk-analyzer
 opentelemetry-api==1.45.0
-    # via fastapi
+    # via
+    #   fastapi
+    #   mcp
 pgvector==0.5.0
     # via vendor-risk-analyzer
 pyasn1==0.6.4
@@ -104,11 +130,15 @@ pydantic==2.13.5
     # via
     #   fastapi
     #   google-genai
+    #   mcp
+    #   mcp-types
     #   pydantic-settings
 pydantic-core==2.46.5
     # via pydantic
 pydantic-settings==2.15.0
     # via vendor-risk-analyzer
+pyjwt==2.15.1
+    # via mcp
 pymupdf==1.28.2
     # via vendor-risk-analyzer
 python-dateutil==2.9.0.post0
@@ -119,12 +149,24 @@ python-dotenv==1.2.4
     # via
     #   pydantic-settings
     #   uvicorn
+python-multipart==0.0.32
+    # via mcp
+pywin32==312 ; sys_platform == 'win32'
+    # via mcp
 pyyaml==6.0.3
     # via uvicorn
+referencing==0.37.0
+    # via
+    #   jsonschema
+    #   jsonschema-specifications
 requests==2.34.2
     # via
     #   google-auth
     #   google-genai
+rpds-py==2026.9.1
+    # via
+    #   jsonschema
+    #   referencing
 s3transfer==0.19.2
     # via boto3
 six==1.17.0
@@ -135,26 +177,40 @@ sqlalchemy==2.1.3
     # via
     #   alembic
     #   vendor-risk-analyzer
+sse-starlette==3.5.0
+    # via mcp
 starlette==1.7.0
-    # via fastapi
+    # via
+    #   fastapi
+    #   mcp
+    #   sse-starlette
 tenacity==9.1.4
     # via google-genai
+truststore==0.10.4 ; sys_platform != 'emscripten'
+    # via
+    #   httpcore2
+    #   httpx2
 typing-extensions==4.16.0
     # via
     #   alembic
     #   anyio
     #   fastapi
     #   google-genai
+    #   httpx2
+    #   mcp
+    #   mcp-types
     #   opentelemetry-api
     #   pydantic
     #   pydantic-core
     #   python-docx
+    #   referencing
     #   sqlalchemy
     #   starlette
     #   typing-inspection
 typing-inspection==0.4.4
     # via
     #   fastapi
+    #   mcp
     #   pydantic
     #   pydantic-settings
 urllib3==2.8.0
@@ -162,7 +218,9 @@ urllib3==2.8.0
     #   botocore
     #   requests
 uvicorn==0.54.0
-    # via vendor-risk-analyzer
+    # via
+    #   mcp
+    #   vendor-risk-analyzer
 uvloop==0.23.0 ; platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'
     # via uvicorn
 watchfiles==1.3.0

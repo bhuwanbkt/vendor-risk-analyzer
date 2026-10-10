@@ -18,6 +18,7 @@ def settings(**updates):
         "app_env": "development",
         "session_cookie_secure": True,
         "api_bearer_enabled": False,
+        "mcp_enabled": False,
         "database_url": "postgresql://test:test@localhost/test",
         "zitadel_issuer": "https://identity.example.invalid",
         "zitadel_client_id": "client",
@@ -105,6 +106,40 @@ def test_nonsecure_cookies_are_refused_outside_local_development(updates):
 def test_bearer_configuration_requires_trusted_https_issuer(updates):
     with pytest.raises(ValidationError, match="HTTPS"):
         settings(api_bearer_enabled=True, **updates)
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"api_bearer_enabled": False},
+        {"mcp_public_url": None},
+        {"mcp_public_url": "http://remote.example/mcp"},
+        {"app_env": "production", "mcp_public_url": "http://localhost:8000/mcp"},
+        {"mcp_public_url": "https://app.example/wrong"},
+        {"mcp_public_url": "https://app.example/mcp/"},
+        {"mcp_public_url": "https://user:password@app.example/mcp"},
+        {"mcp_public_url": "https://app.example/mcp?token=secret"},
+        {"mcp_public_url": "https://app.example/mcp#fragment"},
+    ],
+)
+def test_mcp_requires_bearer_and_an_exact_safe_public_endpoint(updates):
+    config = {
+        "mcp_enabled": True,
+        "api_bearer_enabled": True,
+        "mcp_public_url": "https://app.example/mcp",
+    }
+    config.update(updates)
+    with pytest.raises(ValidationError, match="MCP"):
+        settings(**config)
+
+
+@pytest.mark.parametrize("url", [
+    "http://localhost:8000/mcp", "http://127.0.0.1:8000/mcp",
+    "http://[::1]:8000/mcp", "https://app.example/mcp",
+])
+def test_mcp_accepts_https_or_explicit_loopback_development(url):
+    config = settings(mcp_enabled=True, api_bearer_enabled=True, mcp_public_url=url)
+    assert str(config.mcp_public_url) == url
 
 
 def test_presigned_browser_upload_uses_public_endpoint_but_download_uses_internal(
