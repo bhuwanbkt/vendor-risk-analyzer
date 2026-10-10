@@ -40,8 +40,8 @@ health checks can start with the example settings; actual sign-in requires your
 ZITADEL configuration, and embeddings/assessments/chat require Gemini. These
 external services are not included in Compose, so the complete app is not offline.
 
-See [the local setup guide](docs/local-development.md) for pip installation using
-`requirements.txt`, service ports, stopping the stack, and troubleshooting. Local
+See [the local setup guide](docs/local-development.md) for the native uv setup,
+optional pip compatibility, service ports, stopping the stack, and troubleshooting. Local
 HTTP cookies are permitted only in development with localhost callback/logout
 URLs. Hosted deployments keep Secure cookies by default.
 
@@ -105,8 +105,11 @@ by default. Tokens must be signed by the configured ZITADEL issuer, target this
 project, and contain its project-specific roles; the existing role permissions
 apply. Cookie requests still require CSRF for writes. See
 [API authentication](docs/api-authentication.md) for provider setup and examples.
-This provides API authentication for external clients; an MCP server and tools are
-not implemented yet.
+An optional MCP server at `/mcp` uses the same JWT verifier. Set
+`MCP_ENABLED=true` and `MCP_PUBLIC_URL` to its exact external URL after configuring
+bearer mode. It exposes six typed tools for vendor/document/assessment reads and
+analyst/admin grounded questions. Browser cookies cannot authenticate MCP.
+See [MCP setup and client examples](docs/mcp.md).
 
 ## Tests
 
@@ -128,6 +131,7 @@ These tests run without production credentials or external services. See
 GitHub Actions compiles the sources and runs the full suite with coverage on pull
 requests and pushes to `main`.
 
-A second CI job builds and starts Compose, checks PostgreSQL migrations and private
-MinIO uploads/ingestion, and installs `requirements.txt` in a clean pip environment.
+A second CI job builds and starts Compose, checks PostgreSQL migrations, private
+MinIO uploads/ingestion, and MCP startup/discovery/authentication rejection. It also
+installs `requirements.txt` in a clean pip environment.
 It uses disposable test identities and does not contact ZITADEL or Gemini.

@@ -62,6 +62,24 @@ def main():
     page = request(app_url + "/sign-in")
     assert page[0] == 200 and b"Sign in to your workspace" in page[2]
     assert request(app_url + "/api/vendors")[0] == 401
+    if config.get("MCP_ENABLED", "false").lower() == "true":
+        status, _, body = request(app_url + "/.well-known/oauth-protected-resource/mcp")
+        assert status == 200
+        metadata = json.loads(body)
+        assert metadata["resource"] == app_url + "/mcp"
+        assert metadata["bearer_methods_supported"] == ["header"]
+        for method in ("GET", "POST", "DELETE"):
+            status, headers, _ = request(app_url + "/mcp", method=method)
+            assert status == 401
+            assert "resource_metadata=" in headers["WWW-Authenticate"]
+            assert headers["Cache-Control"] == "no-store"
+        # A signed browser identity is never an MCP credential.
+        assert request(app_url + "/mcp", headers={"Cookie": cookie("admin")})[0] == 401
+        assert request(app_url + "/mcp", headers={"Authorization": "Bearer not-a-jwt"})[0] == 401
+        assert request(app_url + "/mcp", headers={"Origin": "https://attacker.example"})[0] == 403
+        print("Compose MCP smoke passed: startup, public discovery, header-token gate, cookie rejection, and Origin checks.")
+    else:
+        assert request(app_url + "/mcp")[0] == 404
     status, _ = api(
         "/api/vendors",
         method="POST",

@@ -11,6 +11,7 @@ import base64
 import json
 import math
 import time
+from dataclasses import dataclass
 from functools import lru_cache
 
 import httpx
@@ -31,6 +32,12 @@ class InvalidBearerToken(Exception):
 
 class BearerProviderUnavailable(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class VerifiedAccessToken:
+    user: dict
+    claims: dict
 
 
 class BearerTokenVerifier:
@@ -102,7 +109,7 @@ class BearerTokenVerifier:
                 raise InvalidBearerToken()
             return self._keys[kid]
 
-    async def verify(self, value: str) -> dict:
+    async def verify_access_token(self, value: str) -> VerifiedAccessToken:
         try:
             if not value.isascii() or len(value) > 16_384 or len(value.split(".")) != 3:
                 raise InvalidBearerToken()
@@ -175,7 +182,9 @@ class BearerTokenVerifier:
                         )
                     ):
                         roles.append(role)
-            return {"sub": claims["sub"], "roles": roles}
+            return VerifiedAccessToken(
+                user={"sub": claims["sub"], "roles": roles}, claims=claims
+            )
         except (
             JoseError,
             ValueError,
@@ -185,6 +194,9 @@ class BearerTokenVerifier:
             RecursionError,
         ) as exc:
             raise InvalidBearerToken() from exc
+
+    async def verify(self, value: str) -> dict:
+        return (await self.verify_access_token(value)).user
 
 
 @lru_cache(maxsize=8)

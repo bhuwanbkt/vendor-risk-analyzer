@@ -79,6 +79,6 @@ separate API token.
 
 Automated tests use real RSA signatures and mocked trusted-key HTTP responses.
 Before enabling bearer mode on a hosted deployment, check actual ZITADEL-issued
-JWTs for Viewer/Analyst/Admin and no-role identities. This change supplies the API
-authentication foundation; an MCP transport and tool definitions remain future
-work.
+JWTs for Viewer/Analyst/Admin and no-role identities. The optional
+[MCP transport](mcp.md) reuses this verifier, requires bearer headers on every
+protocol request, and adds fixed tools with per-call role checks.

@@ -50,6 +50,14 @@ precedence, CSRF separation, JWKS caching/rotation/rate limits, provider failure
 and rejection before database or cloud work. Signing keys and HTTP responses are
 test-only; real ZITADEL-issued access tokens still need a provider integration check.
 
+MCP tests use the production lifespan and real Streamable HTTP transport with
+signed access tokens. They verify public OAuth discovery, modern and legacy MCP
+requests, required header tokens, cookie rejection, per-call roles, no-role denial,
+Host/Origin validation, body and input limits, provider outages, pagination,
+vendor-specific lists/reports, and analyst/admin grounded questions. Report reads
+match HTTP responses. Forbidden calls do no database or Gemini work; failed chat
+calls close their embedding client. MCP client/provider login remains a live check.
+
 Vendor boundaries cover document list filters, vendor/document ID matching before
 completion or ingestion, vendor-specific upload keys, assessment finding separation,
 and explicit vendor context passed to chat. Application roles currently have access

@@ -9,11 +9,11 @@ from fastapi import (
     HTTPException,
     status,
 )
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
 )
 
+from vendor_risk_analyzer.assessments import repository
 from vendor_risk_analyzer.assessments.service import (
     AssessmentPersistenceError,
     AssessmentPersistenceService,
@@ -21,10 +21,6 @@ from vendor_risk_analyzer.assessments.service import (
 from vendor_risk_analyzer.auth.dependencies import (
     require_roles,
     verify_csrf,
-)
-from vendor_risk_analyzer.db.models import (
-    Assessment,
-    Finding,
 )
 from vendor_risk_analyzer.db.session import (
     get_db,
@@ -46,7 +42,6 @@ from vendor_risk_analyzer.risk_policy.service import (
     RiskPolicyService,
 )
 from vendor_risk_analyzer.schemas.assessment import (
-    AssessmentFindingResponse,
     AssessmentResponse,
 )
 
@@ -66,155 +61,15 @@ router = APIRouter(
 # ============================================================
 
 
-def build_finding_response(
-    finding: Finding,
-) -> AssessmentFindingResponse:
-    """
-    Convert a Finding ORM model into
-    the API response schema.
-    """
-
-    return AssessmentFindingResponse(
-        id=finding.id,
-        assessment_id=(
-            finding.assessment_id
-        ),
-        document_id=(
-            finding.document_id
-        ),
-        document_element_id=(
-            finding.document_element_id
-        ),
-        document_chunk_id=(
-            finding.document_chunk_id
-        ),
-        category=(
-            finding.category
-        ),
-        severity=(
-            finding.severity
-        ),
-        title=(
-            finding.title
-        ),
-        description=(
-            finding.description
-        ),
-        recommendation=(
-            finding.recommendation
-        ),
-        confidence=(
-            finding.confidence
-        ),
-        rule_id=(
-            finding.rule_id
-        ),
-        status=(
-            finding.status
-        ),
-        metadata=(
-            finding.extra_data
-            or {}
-        ),
-        created_at=(
-            finding.created_at
-        ),
-        updated_at=(
-            finding.updated_at
-        ),
-    )
-
-
 async def load_assessment_response(
-    *,
-    db: AsyncSession,
-    assessment_id: UUID,
+    *, db: AsyncSession, assessment_id: UUID
 ) -> AssessmentResponse:
-    """
-    Load the final persisted assessment
-    and all findings from PostgreSQL.
-
-    The API intentionally returns what
-    actually exists in the database
-    instead of reconstructing the final
-    response from intermediate objects.
-    """
-
-    assessment = await db.get(
-        Assessment,
-        assessment_id,
-    )
-
-    if assessment is None:
-        raise HTTPException(
-            status_code=(
-                status.HTTP_404_NOT_FOUND
-            ),
-            detail=(
-                "Assessment not found"
-            ),
+    try:
+        return await repository.load_assessment_response(
+            db=db, assessment_id=assessment_id
         )
-
-    result = await db.execute(
-        select(
-            Finding
-        )
-        .where(
-            Finding.assessment_id
-            == assessment.id
-        )
-        .order_by(
-            Finding.created_at
-        )
-    )
-
-    findings = list(
-        result.scalars().all()
-    )
-
-    return AssessmentResponse(
-        id=(
-            assessment.id
-        ),
-        vendor_id=(
-            assessment.vendor_id
-        ),
-        status=(
-            assessment.status
-        ),
-        assessment_type=(
-            assessment.assessment_type
-        ),
-        overall_score=(
-            assessment.overall_score
-        ),
-        overall_risk=(
-            assessment.overall_risk
-        ),
-        started_at=(
-            assessment.started_at
-        ),
-        completed_at=(
-            assessment.completed_at
-        ),
-        metadata=(
-            assessment.extra_data
-            or {}
-        ),
-        created_at=(
-            assessment.created_at
-        ),
-        updated_at=(
-            assessment.updated_at
-        ),
-        findings=[
-            build_finding_response(
-                finding
-            )
-            for finding
-            in findings
-        ],
-    )
+    except repository.AssessmentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Assessment not found") from exc
 
 
 # ============================================================

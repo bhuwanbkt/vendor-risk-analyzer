@@ -2,7 +2,7 @@ from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import model_validator
+from pydantic import AnyHttpUrl, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     session_secret: str
     session_cookie_secure: bool = True
     api_bearer_enabled: bool = False
+    mcp_enabled: bool = False
+    mcp_public_url: AnyHttpUrl | None = None
 
     object_storage_endpoint: str
     object_storage_region: str
@@ -56,6 +58,30 @@ class Settings(BaseSettings):
             ):
                 raise ValueError(
                     "Bearer authentication requires an HTTPS issuer and project ID"
+                )
+        if self.mcp_enabled:
+            if not self.api_bearer_enabled or self.mcp_public_url is None:
+                raise ValueError(
+                    "MCP requires bearer authentication and MCP_PUBLIC_URL"
+                )
+            url = self.mcp_public_url
+            if (
+                url.username
+                or url.password
+                or url.query
+                or url.fragment
+                or url.path != "/mcp"
+                or (
+                    url.scheme != "https"
+                    and not (
+                        self.app_env == "development"
+                        and url.host in {"localhost", "127.0.0.1", "[::1]"}
+                    )
+                )
+            ):
+                raise ValueError(
+                    "MCP_PUBLIC_URL must be the HTTPS /mcp endpoint; "
+                    "HTTP loopback is allowed only in development"
                 )
         return self
 

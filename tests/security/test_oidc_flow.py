@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
+import httpx2
 import pytest
 from joserfc import jwt
 from joserfc.jwk import RSAKey
@@ -122,9 +123,26 @@ def oidc_provider(security_api, monkeypatch, oidc_signing_key):
 
     def local_http(self, *args, **kwargs):
         kwargs["transport"] = httpx.MockTransport(handle)
+        kwargs["trust_env"] = False
         original_init(self, *args, **kwargs)
 
     monkeypatch.setattr(httpx.AsyncClient, "__init__", local_http)
+    # Authlib uses httpx2 when available (installed by the MCP v2 SDK).
+    # Keep both provider transports local without overriding OIDC validation.
+    original_httpx2_init = httpx2.AsyncClient.__init__
+
+    def handle_httpx2(request):
+        response = handle(request)
+        return httpx2.Response(
+            response.status_code, headers=response.headers, content=response.content
+        )
+
+    def local_httpx2(self, *args, **kwargs):
+        kwargs["transport"] = httpx2.MockTransport(handle_httpx2)
+        kwargs["trust_env"] = False
+        original_httpx2_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx2.AsyncClient, "__init__", local_httpx2)
     monkeypatch.setattr(routes.oauth.zitadel, "server_metadata", {})
 
     def begin(**params):

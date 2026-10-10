@@ -3,93 +3,10 @@ from __future__ import annotations
 import base64
 import json
 import time
-from types import SimpleNamespace
-
-import httpx
 import pytest
 from joserfc import jwt
-from joserfc.jwk import RSAKey
 
 pytestmark = pytest.mark.security
-
-
-@pytest.fixture(scope="module")
-def signing_keys():
-    return [
-        RSAKey.generate_key(2048, parameters={"kid": name})
-        for name in ("api-key-one", "api-key-two")
-    ]
-
-
-@pytest.fixture
-def bearer_api(security_api, monkeypatch, signing_keys):
-    from vendor_risk_analyzer.auth import bearer
-    from vendor_risk_analyzer.config import get_settings
-
-    monkeypatch.setenv("API_BEARER_ENABLED", "true")
-    get_settings.cache_clear()
-    settings = get_settings()
-    bearer.get_bearer_verifier.cache_clear()
-    provider = SimpleNamespace(
-        api=security_api,
-        issuer=settings.zitadel_issuer,
-        project=settings.zitadel_project_id,
-        keys=[signing_keys[0]],
-        requests=[],
-        status=200,
-        document=None,
-        clock_offset=0,
-    )
-    clock = time.monotonic
-    monkeypatch.setattr(
-        bearer,
-        "time",
-        SimpleNamespace(monotonic=lambda: clock() + provider.clock_offset),
-    )
-
-    def handle(request):
-        assert str(request.url) == provider.issuer + "/oauth/v2/keys"
-        provider.requests.append(request)
-        document = (
-            provider.document
-            if provider.document is not None
-            else {"keys": [key.as_dict() for key in provider.keys]}
-        )
-        return httpx.Response(provider.status, json=document)
-
-    original = httpx.AsyncClient
-    monkeypatch.setattr(
-        bearer.httpx,
-        "AsyncClient",
-        lambda *args, **kwargs: original(
-            *args, **kwargs, transport=httpx.MockTransport(handle)
-        ),
-    )
-
-    def token(roles=("analyst",), *, updates=None, omit=(), key=None, header=None):
-        now = int(time.time())
-        claims = {
-            "iss": provider.issuer,
-            "aud": [provider.project],
-            "sub": "api-user",
-            "jti": "access-token-test",
-            "iat": now,
-            "exp": now + 300,
-            "nbf": now - 1,
-            f"urn:zitadel:iam:org:project:{provider.project}:roles": {
-                role: {"test-org": "example.invalid"} for role in roles
-            },
-        }
-        claims.update(updates or {})
-        for name in omit:
-            claims.pop(name, None)
-        key = key or signing_keys[0]
-        return jwt.encode(header or {"alg": "RS256", "kid": key.kid}, claims, key)
-
-    provider.token = token
-    provider.headers = lambda **kwargs: {"Authorization": "Bearer " + token(**kwargs)}
-    yield provider
-    bearer.get_bearer_verifier.cache_clear()
 
 
 @pytest.mark.parametrize("role", ["viewer", "analyst", "admin"])
