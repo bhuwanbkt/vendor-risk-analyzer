@@ -5,6 +5,12 @@
 Install Docker Desktop on macOS/Windows, or Docker Engine plus Compose v2 on
 Linux. Use Linux containers. Python is included in the app image.
 
+MinIO's community distribution is source-only. Compose builds the pinned
+[MinIO source release](https://github.com/minio/minio/releases/tag/RELEASE.2025-10-15T17-29-55Z)
+using a separate Docker build stage; no Go installation is needed on your machine.
+The first build downloads dependencies and can take several minutes. Later builds
+reuse Docker's cache.
+
 Copy `.env.local.example` to `.env.local`. Keep local credentials out of git.
 Generate a unique session secret, for example:
 
