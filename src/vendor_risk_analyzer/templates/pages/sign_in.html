@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ page_title }} · Vendor Risk Analyzer</title>
+    <link rel="stylesheet" href="/static/css/app.css?v=2">
+    <link rel="stylesheet" href="/static/css/auth-entry.css?v=1">
+</head>
+<body class="entry-page">
+    <header class="entry-header">
+        <a class="entry-brand" href="/sign-in" aria-label="Vendor Risk Analyzer home">
+            <span class="entry-mark" aria-hidden="true">VR</span>
+            <span>Vendor Risk Analyzer</span>
+        </a>
+        <span class="entry-header-note">Your vendor review workspace</span>
+    </header>
+
+    <main class="entry-layout">
+        <section class="entry-intro" aria-labelledby="intro-title">
+            <p class="entry-eyebrow">Evidence. Insight. Confidence.</p>
+            <h1 id="intro-title">A clearer view of <span>vendor risk.</span></h1>
+            <p class="entry-description">
+                Review security evidence, track findings, and make informed
+                decisions about the companies you work with.
+            </p>
+            <ul class="entry-features">
+                <li>
+                    <span class="entry-feature-mark" aria-hidden="true">01</span>
+                    <div>
+                        <h2>Keep evidence together</h2>
+                        <p>Organize vendor documents in one place.</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="entry-feature-mark" aria-hidden="true">02</span>
+                    <div>
+                        <h2>Understand the risks</h2>
+                        <p>Review assessments and the evidence behind findings.</p>
+                    </div>
+                </li>
+                <li>
+                    <span class="entry-feature-mark" aria-hidden="true">03</span>
+                    <div>
+                        <h2>Ask better questions</h2>
+                        <p>Explore vendor evidence with an AI assistant.</p>
+                    </div>
+                </li>
+            </ul>
+            <p class="entry-access-note">An account and assigned app role are required to open the workspace.</p>
+        </section>
+
+        <section class="entry-card" aria-labelledby="sign-in-title">
+            {% if user %}
+            <div class="entry-access-message" role="status">
+                <span class="entry-status">Account access</span>
+                <h2>Your account needs access</h2>
+                <p>
+                    You're signed in as <strong>{{ display_name }}</strong>.
+                    This account does not have an app role yet.
+                </p>
+                {% if user.email or user.preferred_username %}
+                <p class="entry-identity">{{ user.email or user.preferred_username }}</p>
+                {% endif %}
+                <p>
+                    Ask your app administrator to assign you Viewer, Analyst,
+                    or Admin access. Once access is granted, sign in again.
+                </p>
+            </div>
+            <h2 id="sign-in-title">Sign in with another account</h2>
+            <p class="entry-card-description">Have an account with access? Use it below.</p>
+            {% else %}
+            <span class="entry-status entry-status-ready">Welcome</span>
+            <h2 id="sign-in-title">Sign in to your workspace</h2>
+            <p class="entry-card-description">Use your work account to continue.</p>
+            {% endif %}
+
+            <form action="/auth/login" method="get" class="entry-form">
+                <label for="login-hint">Email or username</label>
+                <input
+                    id="login-hint"
+                    name="login_hint"
+                    type="text"
+                    autocomplete="username"
+                    autocapitalize="none"
+                    spellcheck="false"
+                    maxlength="320"
+                    placeholder="Enter your email or username"
+                    aria-describedby="sign-in-help"
+                    required
+                >
+                <button type="submit">Continue to sign in <span aria-hidden="true">→</span></button>
+                <p id="sign-in-help" class="entry-form-help">
+                    You'll enter your password on ZITADEL's secure sign-in page.
+                </p>
+            </form>
+
+            {% if user %}
+            <a class="entry-sign-out" href="/auth/logout">Sign out</a>
+            {% else %}
+            <p class="entry-card-footer">
+                Need access? Ask your app administrator for an account and a role.
+            </p>
+            {% endif %}
+        </section>
+    </main>
+    <footer class="entry-footer">Vendor Risk Analyzer · Access for authorized teams</footer>
+</body>
+</html>

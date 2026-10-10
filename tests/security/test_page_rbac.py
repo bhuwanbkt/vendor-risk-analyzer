@@ -20,7 +20,7 @@ PRIVATE_PAGES = READ_PAGES + ["/chat", "/profile", "/admin/system"]
 def test_anonymous_direct_page_access_redirects_to_login(security_api, path):
     response = security_api.client.get(path.format(**security_api.ids))
     assert response.status_code == 302
-    assert response.headers["location"] == "/auth/login"
+    assert response.headers["location"] == "/sign-in"
     security_api.assert_no_work()
 
 
@@ -42,6 +42,12 @@ def test_roleless_and_malformed_sessions_cannot_read_private_pages(
     security_api.authenticate(user={"sub": "test-user", "roles": roles})
     response = security_api.client.get(path.format(**security_api.ids))
     assert response.status_code == 403
+    assert response.headers["content-type"].startswith("text/html")
+    assert "Your account needs access" in response.text
+    assert 'action="/auth/login"' in response.text
+    assert 'class="app-shell"' not in response.text
+    assert "Private summary" not in response.text
+    assert "Private finding" not in response.text
     security_api.assert_no_work()
 
 
@@ -78,6 +84,8 @@ def test_unassigned_user_profile_does_not_advertise_private_navigation(security_
     security_api.authenticate([])
     response = security_api.client.get("/profile")
     assert response.status_code == 200
+    assert "Your account needs access" in response.text
+    assert 'class="app-shell"' not in response.text
     for path in (
         "/dashboard",
         "/vendors",
@@ -87,6 +95,7 @@ def test_unassigned_user_profile_does_not_advertise_private_navigation(security_
         "/admin/system",
     ):
         assert f'href="{path}"' not in response.text
+    security_api.assert_no_work()
 
 
 def test_pages_issue_a_secure_session_cookie(security_api):

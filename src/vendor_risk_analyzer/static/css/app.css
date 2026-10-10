@@ -314,6 +314,31 @@ a {
     position: relative;
 }
 
+.topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.sign-out-button {
+    flex-shrink: 0;
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: white;
+    font-size: 12px;
+    font-weight: 650;
+}
+
+.sign-out-button:hover {
+    background: var(--surface-soft);
+}
+
+.sign-out-button:focus-visible {
+    outline: 3px solid #a5b4fc;
+    outline-offset: 3px;
+}
+
 
 .profile-button {
     display: flex;
