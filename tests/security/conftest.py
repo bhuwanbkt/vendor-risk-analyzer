@@ -67,6 +67,9 @@ class LocalAsyncSession:
 def security_api(monkeypatch):
     # Fake configuration must be in place before the application is imported.
     values = {
+        "APP_ENV": "test",
+        "SESSION_COOKIE_SECURE": "true",
+        "API_BEARER_ENABLED": "false",
         "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/test",
         "ZITADEL_ISSUER": "https://identity.example.invalid",
         "ZITADEL_CLIENT_ID": "test-client",

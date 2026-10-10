@@ -43,11 +43,20 @@ and encoded correctly. Logout ignores caller-supplied account hints and uses the
 authenticated provider login name when present. A simulated provider return to the
 app root opens the public form without starting OIDC again.
 
+Bearer tests enable the opt-in API mode and exercise real RS256 signatures through
+the middleware and unchanged route permissions. They cover fixed issuer/project
+audience, token types and timestamps, malformed headers, role claims, cookie/header
+precedence, CSRF separation, JWKS caching/rotation/rate limits, provider failure,
+and rejection before database or cloud work. Signing keys and HTTP responses are
+test-only; real ZITADEL-issued access tokens still need a provider integration check.
+
 Vendor boundaries cover document list filters, vendor/document ID matching before
 completion or ingestion, vendor-specific upload keys, assessment finding separation,
 and explicit vendor context passed to chat. Application roles currently have access
 to all vendors: this suite does not assert per-user or tenant ownership, which the
 current schema does not model. SQLite does not validate PostgreSQL/pgvector search.
 The OIDC tests do not exercise ZITADEL's hosted login UI, its browser SSO cookies,
-or actual provider session termination. Those behaviors, object storage, LLMs, and
-Northflank deployment still require live integration validation.
+or actual provider session termination. A separate CI Compose job exercises real
+PostgreSQL/pgvector migrations and private MinIO uploads/downloads/ingestion.
+Hosted provider behavior, production object storage, Gemini, vector retrieval
+quality, and Northflank deployment still require live integration validation.

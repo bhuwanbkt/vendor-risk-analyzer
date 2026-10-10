@@ -4,6 +4,46 @@ A FastAPI application for reviewing vendor security documents, generating risk
 assessments, and asking questions about vendor evidence. The application uses
 PostgreSQL/pgvector, object storage, Gemini, and ZITADEL authentication.
 
+## Run locally
+
+Use Docker Desktop on macOS/Windows, or Docker Engine with Compose v2 on Linux.
+The Compose stack runs the app, PostgreSQL with pgvector, and private MinIO object
+storage. It applies migrations and creates the storage bucket before starting the
+app. Data persists across restarts.
+
+```sh
+git clone https://github.com/bhuwanbkt/vendor-risk-analyzer.git
+cd vendor-risk-analyzer
+cp .env.local.example .env.local
+```
+
+Edit `.env.local`: replace `SESSION_SECRET` and the ZITADEL issuer/client/project
+placeholders with your own settings. For AI features, add `GEMINI_API_KEY` and set
+`EMBEDDING_WORKER_ENABLED=true`. Register these exact local URLs in a separate
+ZITADEL development application:
+
+- Callback: `http://localhost:8000/auth/callback`
+- After logout: `http://localhost:8000/`
+
+Enable ZITADEL development mode for HTTP callbacks, use Authorization Code with
+S256 PKCE and token endpoint authentication `none`, and assign users the lowercase
+project roles described below. This app does not configure a client secret.
+
+```sh
+docker compose --env-file .env.local up --build -d
+docker compose --env-file .env.local logs -f app
+```
+
+Open [http://localhost:8000](http://localhost:8000). The public sign-in page and
+health checks can start with the example settings; actual sign-in requires your
+ZITADEL configuration, and embeddings/assessments/chat require Gemini. These
+external services are not included in Compose, so the complete app is not offline.
+
+See [the local setup guide](docs/local-development.md) for pip installation using
+`requirements.txt`, service ports, stopping the stack, and troubleshooting. Local
+HTTP cookies are permitted only in development with localhost callback/logout
+URLs. Hosted deployments keep Secure cookies by default.
+
 ## Authentication and access
 
 Configure the ZITADEL settings shown in [.env.example](.env.example). Register
@@ -48,13 +88,24 @@ for hosted login/logout behavior.
 
 Explicit sign-in now requests fresh authentication. Closing a tab does not log you out.
 For an isolated Chrome Incognito test, close every Incognito window before opening
-a fresh one. Browser authentication requires HTTPS because app cookies are Secure.
+a fresh one. Hosted browser authentication requires HTTPS because app cookies are
+Secure; the documented localhost development setup has an explicit exception.
 
 To validate after deployment: sign out and confirm the public sign-in page opens;
 sign in with another account and check its permissions; sign in with an account
 that has no app role and confirm only the access message/form appear. ZITADEL
 controls the hosted login/logout UI, so provider account selection and session
 termination still need a live browser check.
+
+## External API clients
+
+JWT bearer access tokens are supported when `API_BEARER_ENABLED=true`. This is off
+by default. Tokens must be signed by the configured ZITADEL issuer, target this
+project, and contain its project-specific roles; the existing role permissions
+apply. Cookie requests still require CSRF for writes. See
+[API authentication](docs/api-authentication.md) for provider setup and examples.
+This provides API authentication for external clients; an MCP server and tools are
+not implemented yet.
 
 ## Tests
 
@@ -75,3 +126,7 @@ These tests run without production credentials or external services. See
 [the security test guide](tests/security/README.md) for coverage and limitations.
 GitHub Actions compiles the sources and runs the full suite with coverage on pull
 requests and pushes to `main`.
+
+A second CI job builds and starts Compose, checks PostgreSQL migrations and private
+MinIO uploads/ingestion, and installs `requirements.txt` in a clean pip environment.
+It uses disposable test identities and does not contact ZITADEL or Gemini.

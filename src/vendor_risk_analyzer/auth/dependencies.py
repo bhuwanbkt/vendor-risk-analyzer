@@ -5,6 +5,8 @@ from fastapi import HTTPException, Request, status
 
 
 def get_current_user(request: Request) -> dict:
+    if request.scope.get("api_bearer_authenticated") is True:
+        return request.scope["api_bearer_user"]
     user = request.session.get("user")
 
     if not isinstance(user, dict) or not user:
@@ -45,6 +47,9 @@ def require_roles(
 
 
 def verify_csrf(request: Request) -> None:
+    # Header tokens are verified before route dependencies; cookies still need CSRF.
+    if request.scope.get("api_bearer_authenticated") is True:
+        return
     session_token = request.session.get("csrf_token")
     header_token = request.headers.get("X-CSRF-Token")
 
