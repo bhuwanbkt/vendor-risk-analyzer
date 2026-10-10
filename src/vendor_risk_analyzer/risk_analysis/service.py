@@ -559,6 +559,74 @@ RETRIEVED EVIDENCE
             )
         )
 
+    @staticmethod
+    def _normalized_summary(
+        *,
+        original_summary: str,
+        raw_finding_count: int,
+        findings: list[
+            RiskSignal
+        ],
+    ) -> str:
+        """
+        Keep the model-written summary when
+        normalization does not change findings.
+
+        If deterministic normalization changes
+        the finding set, rebuild the summary from
+        the normalized findings so the report
+        cannot describe findings that no longer
+        exist.
+
+        This does not make another LLM call.
+        """
+
+        if (
+            len(findings)
+            == raw_finding_count
+        ):
+            return original_summary
+
+        if not findings:
+            return (
+                "No qualifying findings remained "
+                "after deterministic finding "
+                "normalization."
+            )
+
+        count = len(findings)
+
+        titles = [
+            finding.title.strip()
+            for finding
+            in findings[:3]
+            if finding.title.strip()
+        ]
+
+        summary = (
+            "Evidence analysis identified "
+            f"{count} normalized "
+            f"{'finding' if count == 1 else 'findings'} "
+            "after consolidating overlapping "
+            "signals."
+        )
+
+        if titles:
+            summary += (
+                " Key findings: "
+                + "; ".join(titles)
+                + "."
+            )
+
+        if len(summary) <= 1200:
+            return summary
+
+        return (
+            summary[:1199]
+            .rstrip()
+            + "."
+        )
+
     def deduplicate_findings(
         self,
         analysis: EvidenceAnalysis,
@@ -773,8 +841,37 @@ RETRIEVED EVIDENCE
                 ),
             )
 
+        normalized_summary = (
+            self._normalized_summary(
+                original_summary=(
+                    analysis.summary
+                ),
+                raw_finding_count=len(
+                    analysis.findings
+                ),
+                findings=deduplicated,
+            )
+        )
+
+        if (
+            normalized_summary
+            != analysis.summary
+        ):
+            logger.info(
+                "Risk analysis summary "
+                "normalized. "
+                "raw_findings=%s "
+                "normalized_findings=%s",
+                len(
+                    analysis.findings
+                ),
+                len(
+                    deduplicated
+                ),
+            )
+
         return EvidenceAnalysis(
-            summary=analysis.summary,
+            summary=normalized_summary,
             findings=deduplicated,
         )
 
