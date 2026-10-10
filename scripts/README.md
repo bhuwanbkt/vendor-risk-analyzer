@@ -74,3 +74,15 @@ or deliberate troubleshooting, not the reusable Northflank job.
 
 Automated unit, security, and regression tests belong in `tests/`.
 They run in GitHub Actions and do not consume Northflank Job slots.
+
+## Dependency direction
+
+Production application code under `src/vendor_risk_analyzer/`
+must not import from `scripts/`.
+
+Shared database and embedding lifecycle logic lives in the
+application package. Operational scripts are thin clients that
+import and invoke that application-owned logic.
+
+This keeps deployment behavior independent from maintenance tooling
+and lets CI catch accidental dependency inversions.
