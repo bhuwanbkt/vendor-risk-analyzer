@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
-from scripts.ops.backfill_embeddings import (
+from vendor_risk_analyzer.embeddings.store import (
     build_embedding_title,
     fetch_chunks,
     finalize_document,
@@ -16,6 +17,7 @@ from scripts.ops.backfill_embeddings import (
     mark_document_failed,
     normalize_metadata,
     save_embedding,
+    update_document_status,
     verify_embedding,
 )
 from vendor_risk_analyzer.db.url import (
@@ -227,6 +229,14 @@ async def process_document(
 
                 return final_status
 
+            # Renew the claim before each batch so a long document that is
+            # still progressing is not treated as abandoned by another worker.
+            await update_document_status(
+                engine,
+                document_id=document_id,
+                status="embedding",
+            )
+
             for chunk in chunks:
                 metadata = (
                     normalize_metadata(
@@ -426,6 +436,19 @@ async def run_embedding_worker() -> None:
     embedding_pending.
     """
 
+    enabled = os.getenv(
+        "EMBEDDING_WORKER_ENABLED", "true"
+    ).strip().lower()
+
+    if enabled in {"false", "0", "no", "off"}:
+        logger.info("Automatic embedding worker is disabled.")
+        return
+
+    if enabled not in {"true", "1", "yes", "on"}:
+        raise ValueError(
+            "EMBEDDING_WORKER_ENABLED must be a boolean value."
+        )
+
     poll_seconds = _get_float_env(
         "EMBEDDING_WORKER_POLL_SECONDS",
         10.0,
@@ -456,26 +479,12 @@ async def run_embedding_worker() -> None:
         pool_pre_ping=True,
     )
 
-    embedding_service = (
-        EmbeddingService()
-    )
+    embedding_service = None
 
     try:
-        recovered = (
-            await recover_stale_documents(
-                engine,
-                stale_minutes=(
-                    stale_minutes
-                ),
-            )
-        )
-
-        if recovered:
-            logger.warning(
-                "Recovered %s stale "
-                "embedding document(s).",
-                recovered,
-            )
+        embedding_service = EmbeddingService()
+        next_recovery_at = time.monotonic()
+        recovery_interval_seconds = stale_minutes * 60.0
 
         logger.info(
             "Automatic embedding worker "
@@ -488,6 +497,24 @@ async def run_embedding_worker() -> None:
 
         while True:
             try:
+                # Retry initial recovery after a transient database failure.
+                # Repeat infrequently so documents interrupted shortly before
+                # startup can be recovered once they become stale.
+                if time.monotonic() >= next_recovery_at:
+                    recovered = await recover_stale_documents(
+                        engine,
+                        stale_minutes=stale_minutes,
+                    )
+                    next_recovery_at = (
+                        time.monotonic() + recovery_interval_seconds
+                    )
+
+                    if recovered:
+                        logger.warning(
+                            "Recovered %s stale embedding document(s).",
+                            recovered,
+                        )
+
                 document_id = (
                     await claim_next_document(
                         engine
@@ -552,6 +579,8 @@ async def run_embedding_worker() -> None:
         raise
 
     finally:
-        await embedding_service.close()
-
-        await engine.dispose()
+        try:
+            if embedding_service is not None:
+                await embedding_service.close()
+        finally:
+            await engine.dispose()
