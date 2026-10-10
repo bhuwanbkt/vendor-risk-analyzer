@@ -1,0 +1,90 @@
+# Local development only. Invoke with --env-file .env.
+x-app: &app
+  build: .
+  image: vendor-risk-analyzer:local
+  env_file:
+    - .env
+  environment:
+    APP_ENV: development
+    PORT: "8000"
+    SESSION_COOKIE_SECURE: "false"
+    DATABASE_URL: postgresql://vendor_risk:${POSTGRES_PASSWORD:-local-database-password}@db:5432/vendor_risk
+    OBJECT_STORAGE_ENDPOINT: http://minio:9000
+    OBJECT_STORAGE_PUBLIC_ENDPOINT: http://localhost:${MINIO_PORT:-9000}
+    OBJECT_STORAGE_REGION: us-east-1
+    OBJECT_STORAGE_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-local-storage-access}
+    OBJECT_STORAGE_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-local-storage-password}
+    OBJECT_STORAGE_BUCKET: vendor-documents
+    OBJECT_STORAGE_ADDRESSING_STYLE: path
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: vendor_risk
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-database-password}
+      POSTGRES_DB: vendor_risk
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/10-vector.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -h 127.0.0.1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  minio:
+    build:
+      context: ./docker/minio
+    image: vendor-risk-minio:local
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-local-storage-access}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-storage-password}
+      MINIO_API_CORS_ALLOW_ORIGIN: http://localhost:${APP_PORT:-8000}
+    ports:
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - storage-data:/data
+    restart: unless-stopped
+
+  migrate:
+    <<: *app
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  storage-init:
+    <<: *app
+    command: ["python", "scripts/local/init_storage.py"]
+    depends_on:
+      minio:
+        condition: service_started
+    restart: "no"
+
+  app:
+    <<: *app
+    ports:
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      storage-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  storage-data:

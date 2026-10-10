@@ -5,6 +5,6 @@ __pycache__
 *.pyc
 .pytest_cache
 .ruff_cache
-.env
+.env*
 tests
 .DS_Store

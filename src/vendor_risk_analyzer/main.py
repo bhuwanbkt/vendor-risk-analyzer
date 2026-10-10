@@ -54,6 +54,7 @@ from vendor_risk_analyzer.api.chat import (
 from vendor_risk_analyzer.auth.routes import (
     router as auth_router,
 )
+from vendor_risk_analyzer.auth.bearer import ApiBearerAuthenticationMiddleware
 
 
 # ============================================================
@@ -225,8 +226,10 @@ app.add_middleware(
 
     same_site="lax",
 
-    https_only=True,
+    https_only=settings.session_cookie_secure,
 )
+
+app.add_middleware(ApiBearerAuthenticationMiddleware)
 
 
 # ============================================================

@@ -171,7 +171,13 @@ def test_login_uses_fixed_callback_state_nonce_and_s256_pkce(oidc_provider):
     )
     assert params["client_id"] == provider.settings.zitadel_client_id
     assert params["redirect_uri"] == provider.settings.zitadel_redirect_uri
-    assert set(params["scope"].split()) == {"openid", "profile", "email"}
+    assert set(params["scope"].split()) == {
+        "openid",
+        "profile",
+        "email",
+        "urn:zitadel:iam:org:projects:roles",
+        f"urn:zitadel:iam:org:project:id:{provider.settings.zitadel_project_id}:aud",
+    }
     assert params["response_type"] == "code"
     assert params["prompt"] == "login"
     assert params["state"] and params["nonce"]
