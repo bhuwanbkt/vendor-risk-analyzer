@@ -26,6 +26,7 @@ from vendor_risk_analyzer.schemas.document import (
     DocumentResponse,
     DocumentUploadRequest,
     DocumentUploadResponse,
+    is_stale_processing,
 )
 from vendor_risk_analyzer.storage.client import (
     generate_upload_url,
@@ -277,7 +278,9 @@ async def ingest_uploaded_document(
         "embedding_pending",
         "embedding_failed",
         "ready",
-    }:
+    } and not is_stale_processing(
+        document.status, document.updated_at
+    ):
         raise HTTPException(
             status_code=409,
             detail=(

@@ -2,7 +2,7 @@ from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import AnyHttpUrl, model_validator
+from pydantic import AnyHttpUrl, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     database_url: str
+    # Small defaults suit pooled hosted databases; raise for more
+    # concurrent requests if the database allows it.
+    database_pool_size: int = Field(default=2, ge=1, le=50)
+    database_max_overflow: int = Field(default=1, ge=0, le=50)
 
     zitadel_issuer: str
     zitadel_client_id: str

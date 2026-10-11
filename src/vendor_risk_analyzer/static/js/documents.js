@@ -210,6 +210,13 @@ async function loadDocuments(
                                 "ready",
                             ].includes(
                                 doc.status
+                            )
+                            ||
+                            (
+                                canManage
+                                &&
+                                doc.stale_processing
+                                === true
                             );
 
 
@@ -270,7 +277,10 @@ async function loadDocuments(
                                                         doc.status
                                                         === "failed"
                                                             ? "Parse"
-                                                            : "Re-parse"
+                                                            : doc.status
+                                                            === "processing"
+                                                                ? "Retry"
+                                                                : "Re-parse"
                                                     }
                                                 </button>
                                             `

@@ -7,6 +7,7 @@ import os
 import re
 
 from google import genai
+from google.genai import types
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -32,6 +33,11 @@ logger = logging.getLogger(
 DEFAULT_MODEL = (
     "gemini-3.1-flash-lite"
 )
+
+# Upper bound for one structured-analysis call. Without it a hung
+# provider request holds the HTTP request (and its worker thread)
+# indefinitely. Override with RISK_LLM_TIMEOUT_SECONDS.
+DEFAULT_LLM_TIMEOUT_SECONDS = 120.0
 
 
 RETRIEVAL_QUERIES = (
@@ -124,8 +130,28 @@ class RiskAnalysisService:
             retrieval_limit
         )
 
+        self.llm_timeout_seconds = float(
+            os.getenv(
+                "RISK_LLM_TIMEOUT_SECONDS",
+                str(DEFAULT_LLM_TIMEOUT_SECONDS),
+            )
+        )
+
+        if self.llm_timeout_seconds <= 0:
+            raise ValueError(
+                "RISK_LLM_TIMEOUT_SECONDS must "
+                "be greater than zero."
+            )
+
         self.client = genai.Client(
-            api_key=self.api_key
+            api_key=self.api_key,
+            # Provider-side timeout (milliseconds) so the
+            # worker thread also stops, not just the await.
+            http_options=types.HttpOptions(
+                timeout=int(
+                    self.llm_timeout_seconds * 1000
+                ),
+            ),
         )
 
     async def collect_evidence(
@@ -886,9 +912,15 @@ RETRIEVED EVIDENCE
             self.model,
         )
 
+        timeout_seconds = getattr(
+            self,
+            "llm_timeout_seconds",
+            DEFAULT_LLM_TIMEOUT_SECONDS,
+        )
+
         try:
-            interaction = (
-                await asyncio.to_thread(
+            interaction = await asyncio.wait_for(
+                asyncio.to_thread(
                     self.client
                     .interactions
                     .create,
@@ -902,8 +934,23 @@ RETRIEVED EVIDENCE
                             EvidenceAnalysis
                             .model_json_schema(),
                     },
-                )
+                ),
+                timeout=timeout_seconds,
             )
+
+        except TimeoutError as exc:
+            logger.error(
+                "Risk analysis LLM request "
+                "timed out. model=%s "
+                "timeout=%.1fs",
+                self.model,
+                timeout_seconds,
+            )
+
+            raise RiskAnalysisError(
+                "Risk analysis model "
+                "request timed out."
+            ) from exc
 
         except Exception:
             logger.exception(
@@ -977,6 +1024,14 @@ RETRIEVED EVIDENCE
                 "No retrieval evidence "
                 "was found for vendor."
             )
+
+        # Retrieval is complete. End the read-only transaction so
+        # this request returns its pooled connection while the slow
+        # LLM call runs; the session reconnects automatically for
+        # persistence. commit() is used instead of rollback()
+        # because, with expire_on_commit=False, it does not expire
+        # objects the caller already loaded (e.g. AccessContext).
+        await db.commit()
 
         prompt = self.build_prompt(
             evidence=evidence,

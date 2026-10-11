@@ -43,8 +43,8 @@ database_url = build_async_database_url(
 
 engine = create_async_engine(
     database_url,
-    pool_size=2,
-    max_overflow=1,
+    pool_size=settings.database_pool_size,
+    max_overflow=settings.database_max_overflow,
     pool_pre_ping=True,
     pool_recycle=300,
 )
