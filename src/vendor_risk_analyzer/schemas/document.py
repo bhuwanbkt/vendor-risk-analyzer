@@ -1,9 +1,31 @@
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+)
 
 
 MAX_FILE_SIZE = 25 * 1024 * 1024
+
+# A document still "processing" after this long was interrupted
+# (crash, restart, or a failed error handler) and may be retried.
+STALE_PROCESSING_AFTER = timedelta(minutes=15)
+
+
+def is_stale_processing(
+    status: str,
+    updated_at: datetime | None,
+) -> bool:
+    if status != "processing" or updated_at is None:
+        return False
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    return updated_at < datetime.now(timezone.utc) - STALE_PROCESSING_AFTER
 
 ALLOWED_EXTENSIONS = {
     "pdf",
@@ -83,3 +105,9 @@ class DocumentResponse(BaseModel):
     mime_type: str | None
     size_bytes: int | None
     status: str
+    updated_at: datetime | None = Field(default=None, exclude=True)
+
+    @computed_field
+    @property
+    def stale_processing(self) -> bool:
+        return is_stale_processing(self.status, self.updated_at)

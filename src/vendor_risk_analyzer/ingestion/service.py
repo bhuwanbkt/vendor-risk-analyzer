@@ -37,6 +37,10 @@ async def ingest_document(
         time.perf_counter()
     )
 
+    # Captured up front: after a rollback every loaded ORM
+    # attribute is expired, including the primary key.
+    document_id = document.id
+
     logger.info(
         "Document %s ingestion started. "
         "File=%s type=%s",
@@ -117,8 +121,12 @@ async def ingest_document(
             document.id,
         )
 
-        parsed_elements = parser.parse(
-            raw_content
+        # CPU-bound parsing runs in a worker thread so a large
+        # document does not block the event loop (other requests
+        # and the embedding worker share this loop).
+        parsed_elements = await asyncio.to_thread(
+            parser.parse,
+            raw_content,
         )
 
         parsing_duration = (
@@ -239,8 +247,9 @@ async def ingest_document(
             document.id,
         )
 
-        parsed_chunks = create_chunks(
-            parsed_elements
+        parsed_chunks = await asyncio.to_thread(
+            create_chunks,
+            parsed_elements,
         )
 
         chunking_duration = (
@@ -375,21 +384,38 @@ async def ingest_document(
             str(exc),
         )
 
-        await db.rollback()
+        try:
+            await db.rollback()
 
-        document.status = "failed"
+            # Rollback expires all loaded ORM objects, even with
+            # expire_on_commit=False. Reading an expired attribute
+            # through AsyncSession triggers an implicit load and
+            # raises MissingGreenlet, which previously left the
+            # document stuck in "processing". Reload explicitly.
+            await db.refresh(document)
 
-        document.extra_data = {
-            **document.extra_data,
-            "ingestion_error": str(exc)[:500],
-        }
+            document.status = "failed"
 
-        await db.commit()
+            document.extra_data = {
+                **(document.extra_data or {}),
+                "ingestion_error": str(exc)[:500],
+            }
 
-        logger.error(
-            "Document %s status changed "
-            "to failed.",
-            document.id,
-        )
+            await db.commit()
+
+        except Exception:
+            # Never mask the original ingestion error. A document
+            # left in "processing" can be retried once it is stale.
+            logger.exception(
+                "Document %s could not be marked failed.",
+                document_id,
+            )
+
+        else:
+            logger.error(
+                "Document %s status changed "
+                "to failed.",
+                document_id,
+            )
 
         raise
