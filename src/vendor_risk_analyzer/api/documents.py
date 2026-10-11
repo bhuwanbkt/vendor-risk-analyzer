@@ -12,6 +12,7 @@ from fastapi import (
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from vendor_risk_analyzer.auth.access import require_vendor_access
 
 from vendor_risk_analyzer.auth.dependencies import (
     require_roles,
@@ -19,7 +20,6 @@ from vendor_risk_analyzer.auth.dependencies import (
 )
 from vendor_risk_analyzer.db.models import (
     Document,
-    Vendor,
 )
 from vendor_risk_analyzer.db.session import get_db
 from vendor_risk_analyzer.schemas.document import (
@@ -68,16 +68,7 @@ async def create_upload_url(
     ),
     _: None = Depends(verify_csrf),
 ):
-    vendor = await db.get(
-        Vendor,
-        vendor_id,
-    )
-
-    if vendor is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Vendor not found",
-        )
+    await require_vendor_access(db, user, vendor_id)
 
     existing = await db.execute(
         select(Document).where(
@@ -165,6 +156,7 @@ async def complete_upload(
     ),
     _: None = Depends(verify_csrf),
 ):
+    await require_vendor_access(db, user, vendor_id)
     result = await db.execute(
         select(Document).where(
             Document.id == document_id,
@@ -232,6 +224,7 @@ async def list_documents(
         )
     ),
 ):
+    await require_vendor_access(db, user, vendor_id)
     result = await db.execute(
         select(Document)
         .where(
@@ -261,6 +254,7 @@ async def ingest_uploaded_document(
     ),
     _: None = Depends(verify_csrf),
 ):
+    await require_vendor_access(db, user, vendor_id)
     result = await db.execute(
         select(Document).where(
             Document.id == document_id,

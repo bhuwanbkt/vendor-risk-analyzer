@@ -15,14 +15,14 @@ from joserfc import jwt
 from joserfc.jwk import RSAKey
 from fastapi.testclient import TestClient
 from itsdangerous import TimestampSigner
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from vendor_risk_analyzer.db.base import Base
-from vendor_risk_analyzer.db.models import Assessment, Document, Finding, Vendor
+from vendor_risk_analyzer.db.models import Assessment, Document, Finding, Vendor, Tenant, TenantMembership
 
 
 @compiles(JSONB, "sqlite")
@@ -65,6 +65,10 @@ class LocalAsyncSession:
     async def refresh(self, value):
         self.calls.append("refresh")
         self.session.refresh(value)
+
+    async def flush(self):
+        self.calls.append("flush")
+        self.session.flush()
 
 
 @pytest.fixture
@@ -124,13 +128,22 @@ def security_api(monkeypatch):
     engine = create_engine(
         "sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False}
     )
+    @event.listens_for(engine, "connect")
+    def enable_foreign_keys(connection, record):
+        connection.execute("PRAGMA foreign_keys=ON")
     Base.metadata.create_all(engine)
     session = Session(engine, expire_on_commit=False)
+    tenant = Tenant(id=UUID(int=100), name="Test Company", zitadel_org_id="test-org", default_access="all")
+    session.add(tenant)
+    session.flush()
+    session.add_all([TenantMembership(tenant_id=tenant.id, subject=subject, access_mode="all", enabled=True)
+                     for subject in ("test-user", "api-user")])
+    session.flush()
     for suffix in ("a", "b"):
         vendor_id = UUID(ids[f"vendor_{suffix}"])
         assessment_id = UUID(ids[f"assessment_{suffix}"])
         session.add(
-            Vendor(id=vendor_id, name=f"Vendor {suffix.upper()}", status="active")
+            Vendor(id=vendor_id, tenant_id=tenant.id, name=f"Vendor {suffix.upper()}", status="active")
         )
         session.add(
             Document(
@@ -239,6 +252,7 @@ def security_api(monkeypatch):
                     "name": "Test User",
                     "email": "user@example.invalid",
                     "roles": roles or [],
+                    "organization_roles": {"test-org": roles or []},
                 }
             data = {"user": user}
             if csrf_token is not None:
@@ -261,6 +275,7 @@ def security_api(monkeypatch):
             signer=signer,
             authenticate=authenticate,
             assert_no_work=assert_no_work,
+            tenant=tenant,
         )
 
     main.app.dependency_overrides.pop(get_db, None)
@@ -286,6 +301,7 @@ def bearer_api(security_api, monkeypatch, signing_keys):
     get_settings.cache_clear()
     settings = get_settings()
     bearer.get_bearer_verifier.cache_clear()
+
     provider = SimpleNamespace(
         api=security_api,
         issuer=settings.zitadel_issuer,
@@ -346,3 +362,25 @@ def bearer_api(security_api, monkeypatch, signing_keys):
     provider.headers = lambda **kwargs: {"Authorization": "Bearer " + token(**kwargs)}
     yield provider
     bearer.get_bearer_verifier.cache_clear()
+
+
+@pytest.fixture(params=["company", "assignment"])
+def restricted_access(security_api, request):
+    """Vendor B is either in a foreign company or unassigned to this subject."""
+    from sqlalchemy import select
+    from vendor_risk_analyzer.db.models import VendorAssignment
+    api = security_api
+    session = api.db.session
+    other = Tenant(id=UUID(int=200), name="Other Company", zitadel_org_id="other-org", default_access="assigned")
+    session.add(other)
+    session.commit()
+    if request.param == "company":
+        session.get(Vendor, UUID(api.ids["vendor_b"])).tenant_id = other.id
+    else:
+        for subject in ("test-user", "api-user"):
+            member = session.scalar(select(TenantMembership).where(TenantMembership.subject == subject))
+            member.access_mode = "assigned"
+            session.add(VendorAssignment(tenant_id=api.tenant.id, member_id=member.id,
+                                        vendor_id=UUID(api.ids["vendor_a"])))
+    session.commit()
+    return request.param

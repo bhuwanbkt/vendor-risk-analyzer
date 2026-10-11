@@ -83,7 +83,15 @@ jobs:
       - name: Validate Compose configuration
         run: docker compose --env-file .env config --quiet
       - name: Build and start local services
-        run: docker compose --env-file .env up --build --detach --wait --wait-timeout 180
+        run: |
+          docker compose --env-file .env build
+          docker compose --env-file .env up --detach --wait --wait-timeout 90 db
+          docker compose --env-file .env run --rm -T --no-deps migrate alembic upgrade 11bc467f9cd8
+          docker compose --env-file .env run --rm -T --no-deps -v "$PWD/tests/tenant_migration_smoke.py:/app/tests/tenant_migration_smoke.py:ro" migrate python tests/tenant_migration_smoke.py --seed
+          docker compose --env-file .env run --rm -T --no-deps migrate
+          docker compose --env-file .env run --rm -T --no-deps -v "$PWD/tests/tenant_migration_smoke.py:/app/tests/tenant_migration_smoke.py:ro" migrate python tests/tenant_migration_smoke.py
+          docker compose --env-file .env up --detach --wait --wait-timeout 180
+          docker compose --env-file .env exec -T app python scripts/ops/register_tenant.py --org-id compose-smoke-org --name "Compose smoke" --legacy --write
       - name: Exercise PostgreSQL and private object storage
         run: uv run --no-project --python 3.12 --with itsdangerous --with python-dotenv python tests/local_runtime_smoke.py
       - name: Validate pip requirements

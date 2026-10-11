@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from vendor_risk_analyzer.auth.access import require_vendor_access
 
 from fastapi import (
     APIRouter,
@@ -79,6 +80,7 @@ async def vendor_chat(
     vendor_id must always come explicitly
     from the application context.
     """
+    await require_vendor_access(db, user, payload.vendor_id)
 
     logger.info(
         "Vendor chat API started. "

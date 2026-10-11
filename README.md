@@ -242,7 +242,9 @@ Compose manages five services:
 
 MinIO is built from the pinned source release in [docker/minio/Dockerfile](docker/minio/Dockerfile).
 The first build can take several minutes; Docker caches later builds. No host Go
-installation is needed. A successful exited `migrate` or `storage-init` container
+installation is needed. Before accessing vendor data,
+[register your ZITADEL organization](docs/company-access.md#register-the-initial-company)
+with the existing workspace. A successful exited `migrate` or `storage-init` container
 is expected.
 
 | Service | Default local address |
@@ -301,7 +303,9 @@ uv run --python 3.12 uvicorn vendor_risk_analyzer.main:app --host 127.0.0.1 --po
 
 uv creates and uses `.venv` automatically. Alembic needs the process environment,
 so its command loads `.env` through `python -m dotenv`; Uvicorn loads `.env` itself.
-Use Python 3.12 to match the container and CI.
+Use Python 3.12 to match the container and CI. After applying migrations,
+[register your company](docs/company-access.md#register-the-initial-company) before
+signing in to access vendor data.
 
 `requirements.txt` is an optional pip compatibility export from `uv.lock`. The
 primary setup uses uv. Dependency changes belong in `pyproject.toml` and the lock
@@ -327,12 +331,14 @@ retrieved sources; citation checks reject missing or out-of-range source markers
 | --- | --- |
 | `viewer` | Read vendors, documents, and assessments |
 | `analyst` | Viewer access plus vendor creation, upload/processing, assessments, and AI chat |
-| `admin` | Analyst access plus `/admin/system`; this does not grant ZITADEL administration rights |
+| `admin` | Analyst access plus company user/vendor controls and `/admin/system`; this does not grant ZITADEL administration rights |
 | No app role | Public access-information/sign-in screen and own identity at `/auth/me`; protected data and controls are forbidden |
 
-Roles currently apply to all vendors. Vendor-specific queries filter results to
-the selected vendor, but the schema does not implement per-user ownership or
-separate tenant permissions.
+Roles apply within the selected company, mapped to a registered ZITADEL
+organization. Company Admins manage each user's access to all company vendors or
+only assigned vendors at `/admin/access`. Dashboard totals, reports, API calls,
+and MCP tools all enforce these permissions. See [Company and vendor access](docs/company-access.md)
+for registration, assignments, and the required production migration order.
 
 Browser login validates the ID token and matching UserInfo subject before creating
 a signed session. Only this project's role claim grants app access. Successful
@@ -494,6 +500,9 @@ ZITADEL, a unique session secret, and `SESSION_COOKIE_SECURE=true`.
 The Compose file is for local development and applies localhost overrides.
 Hosted MCP also needs its public HTTPS URL and a proxy that preserves the Host.
 
+Company access requires the database migration and explicit organization binding
+before deploying the new app. Follow the [Northflank rollout order](docs/company-access.md#northflank-rollout-order).
+
 The existing Northflank layout uses a migration job and a reusable utility job.
 The embedding worker runs inside the application service. See
 [Operational scripts](scripts/README.md) for the fixed job commands, dry-run
@@ -506,7 +515,7 @@ access, a sample document-to-assessment flow, and actual API/MCP client tokens.
 ## Current Limitations
 
 - ZITADEL and Gemini are external dependencies; the complete local application is not offline.
-- Roles grant access across vendors; per-user vendor ownership and tenant separation are not implemented.
+- Company access must be explicitly registered by an operator; team/group assignments are not implemented.
 - Policy coverage is limited, and a numeric overall-risk score is not implemented.
 - Chat history is not persisted on the server.
 - Automated citation checks validate references, not every factual claim in generated text.
@@ -515,13 +524,14 @@ access, a sample document-to-assessment flow, and actual API/MCP client tokens.
 ## Possible Next Steps
 
 - Expand representative retrieval and grounding evaluation datasets.
-- Add vendor ownership or tenant permissions if the product requires them.
+- Add company access audit records and team assignments when needed.
 - Extend deterministic policy coverage and define a documented scoring method.
 - Add persistent chat history, audit records, and richer operational monitoring.
 
 ## Further Documentation
 
 - [Local development and optional pip compatibility](docs/local-development.md)
+- [Company registration, vendor access, and production rollout](docs/company-access.md)
 - [API bearer authentication](docs/api-authentication.md)
 - [MCP tools and client setup](docs/mcp.md)
 - [Security tests and their limits](tests/security/README.md)

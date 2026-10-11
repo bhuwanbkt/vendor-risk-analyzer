@@ -21,7 +21,7 @@ def test_access_token_reads_api_without_creating_browser_session(bearer_api, rol
     }
     assert "set-cookie" not in response.headers
     me = api.client.get("/auth/me", headers=headers)
-    assert me.json() == {"sub": "api-user", "roles": [role]}
+    assert me.json() == {"sub": "api-user", "roles": [role], "organization_roles": {"test-org": [role]}, "organization_id": "test-org"}
     assert len(bearer_api.requests) == 1
 
 

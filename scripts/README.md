@@ -103,3 +103,18 @@ import and invoke that application-owned logic.
 
 This keeps deployment behavior independent from maintenance tooling
 and lets CI catch accidental dependency inversions.
+
+
+## Company registration
+
+The reusable utility runner also supports `OPS_TASK=register_tenant`. Set
+`OPS_ZITADEL_ORG_ID` to the explicit ZITADEL **Organization ID** and
+`OPS_TENANT_NAME` to the company name. Set `OPS_LEGACY_TENANT=true` to bind
+the existing migrated workspace, or leave it false to register a separate empty
+company. `OPS_DEFAULT_ACCESS` optionally chooses `all` or `assigned`.
+It defaults to preview; `OPS_WRITE=true` applies the change.
+
+The new company migration must run before registering or deploying the new app.
+See [Company access rollout](../docs/company-access.md#northflank-rollout-order)
+for the production job order and local uv/Compose commands. Do not create other
+companies until the new app version is deployed.

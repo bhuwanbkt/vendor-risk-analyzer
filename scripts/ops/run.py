@@ -137,10 +137,25 @@ def build_command(
 
         return command
 
+    if task == "register_tenant":
+        org = env.get("OPS_ZITADEL_ORG_ID", "").strip()
+        name = env.get("OPS_TENANT_NAME", "").strip()
+        if not org or not name:
+            raise ValueError("OPS_ZITADEL_ORG_ID and OPS_TENANT_NAME are required for register_tenant")
+        command = [sys.executable, str(OPS_DIR / "register_tenant.py"), "--org-id", org, "--name", name]
+        if _is_truthy(env.get("OPS_LEGACY_TENANT")):
+            command.append("--legacy")
+        default_access = env.get("OPS_DEFAULT_ACCESS", "").strip()
+        if default_access:
+            command.extend(["--default-access", default_access])
+        if _is_truthy(env.get("OPS_WRITE")):
+            command.append("--write")
+        return command
+
     raise ValueError(
         "OPS_TASK must be one of: "
         "backfill_embeddings, "
-        "apply_risk_policy."
+        "apply_risk_policy, register_tenant."
     )
 
 

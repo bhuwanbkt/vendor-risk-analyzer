@@ -82,3 +82,13 @@ Before enabling bearer mode on a hosted deployment, check actual ZITADEL-issued
 JWTs for Viewer/Analyst/Admin and no-role identities. The optional
 [MCP transport](mcp.md) reuses this verifier, requires bearer headers on every
 protocol request, and adds fixed tools with per-call role checks.
+
+
+## Company selection
+
+Roles retain their verified ZITADEL organization grants. A bearer token granting
+roles in several organizations must include `X-Organization-ID` to choose one.
+A token with exactly one granted organization can omit this header. The selected
+organization must be registered in the app, and its membership/vendor policy
+restricts every API data request. Admin roles apply only in their granting
+organization. See [Company access](company-access.md).
