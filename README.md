@@ -64,10 +64,17 @@ Findings distinguish three types:
 | `evidence_gap` | The retrieved evidence does not sufficiently establish a control. |
 | `explicit_risk` | The evidence describes a risk or open issue. |
 
-The LLM identifies risk signals; policy rules assign final severity. Rules do not
-cover every finding type/category combination, so unmatched findings can remain
-`unrated`. Numeric `overall_score` is currently left unset. A report with no
-findings is supported; it does not prove that every possible risk was assessed.
+The LLM identifies risk signals; policy rules assign final severity. Policy
+`vendor-risk-policy-v2` rates every finding type and category combination as low,
+medium, or high; rules never assign `critical`, which requires analyst judgement.
+Numeric `overall_score` is currently left unset.
+
+Each assessment searches nine risk categories (access control, encryption,
+incident response, vulnerability management, privacy, business continuity, data
+retention, third parties, and AI governance) and saves per-category coverage:
+`assessed`, `insufficient_evidence`, `no_evidence`, or `not_reported`. The report
+shows this table so a category without findings is not mistaken for a strong
+control. A report with no findings does not prove that every possible risk was assessed.
 
 ## Data Storage
 
@@ -97,7 +104,7 @@ metadata and use table-specific grouping.
 A query is embedded with Gemini and searched using pgvector cosine distance.
 Search is restricted to the selected vendor, documents with status `ready`, and
 chunks matching the active embedding model and dimension. Chat retrieves up to
-five chunks; assessment analysis collects evidence across several risk topics.
+five chunks; assessment analysis collects evidence for each of nine risk categories.
 
 | Setting | Use |
 | --- | --- |
@@ -516,7 +523,7 @@ access, a sample document-to-assessment flow, and actual API/MCP client tokens.
 
 - ZITADEL and Gemini are external dependencies; the complete local application is not offline.
 - Company access must be explicitly registered by an operator; team/group assignments are not implemented.
-- Policy coverage is limited, and a numeric overall-risk score is not implemented.
+- Policy severities are document-based defaults, and a numeric overall-risk score is not implemented.
 - Chat history is not persisted on the server.
 - Automated citation checks validate references, not every factual claim in generated text.
 - Automated CI does not replace hosted-login, live-model, or retrieval-quality evaluation.
@@ -525,7 +532,7 @@ access, a sample document-to-assessment flow, and actual API/MCP client tokens.
 
 - Expand representative retrieval and grounding evaluation datasets.
 - Add company access audit records and team assignments when needed.
-- Extend deterministic policy coverage and define a documented scoring method.
+- Tune policy severities with analysts and define a documented scoring method.
 - Add persistent chat history, audit records, and richer operational monitoring.
 
 ## Further Documentation

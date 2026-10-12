@@ -10,7 +10,7 @@ from vendor_risk_analyzer.risk_policy.service import (
 def test_policy_version_is_explicit() -> None:
     assert (
         POLICY_VERSION
-        == "vendor-risk-policy-v1"
+        == "vendor-risk-policy-v2"
     )
 
 
@@ -79,3 +79,36 @@ def test_severity_rank_order_is_monotonic() -> None:
     ) == len(
         ranks
     )
+
+
+def test_every_finding_type_and_category_has_a_rule() -> None:
+    from typing import get_args
+
+    from vendor_risk_analyzer.risk_analysis.schemas import (
+        FindingType,
+        RiskCategory,
+    )
+
+    expected = {
+        (finding_type, category)
+        for finding_type in get_args(FindingType)
+        for category in get_args(RiskCategory)
+    }
+
+    assert set(POLICY_RULES) == expected
+
+
+def test_rules_use_valid_unique_ids_and_never_critical() -> None:
+    severities = {rule["severity"] for rule in POLICY_RULES.values()}
+    rule_ids = [rule["rule_id"] for rule in POLICY_RULES.values()]
+
+    assert severities <= {"low", "medium", "high"}
+    assert len(set(rule_ids)) == len(rule_ids)
+    assert all(rule["rationale"].strip() for rule in POLICY_RULES.values())
+
+
+def test_explicit_access_control_risk_is_high() -> None:
+    rule = POLICY_RULES[("explicit_risk", "access_control")]
+
+    assert rule["severity"] == "high"
+    assert rule["rule_id"] == "VRP-AC-EXPLICIT-001"

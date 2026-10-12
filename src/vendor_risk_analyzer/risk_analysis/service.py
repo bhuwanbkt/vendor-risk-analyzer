@@ -18,6 +18,7 @@ from vendor_risk_analyzer.retrieval.service import (
     SemanticRetriever,
 )
 from vendor_risk_analyzer.risk_analysis.schemas import (
+    CategoryCoverageResult,
     EvidenceAnalysis,
     RiskEvidence,
     RiskSignal,
@@ -65,6 +66,71 @@ RETRIEVAL_QUERIES = (
             "business continuity"
         ),
     ),
+    (
+        "access_control",
+        (
+            "user access control authentication "
+            "multi-factor MFA privileged access "
+            "reviews and least privilege"
+        ),
+    ),
+    (
+        "encryption",
+        (
+            "encryption of data at rest and "
+            "in transit TLS and encryption "
+            "key management"
+        ),
+    ),
+    (
+        "vulnerability_management",
+        (
+            "vulnerability management penetration "
+            "testing patching timelines and "
+            "remediation of security findings"
+        ),
+    ),
+    (
+        "data_retention",
+        (
+            "customer data retention deletion "
+            "and disposal including after "
+            "contract termination"
+        ),
+    ),
+    (
+        "third_party",
+        (
+            "subprocessors third-party service "
+            "providers and supply chain "
+            "security risk management"
+        ),
+    ),
+    (
+        "privacy",
+        (
+            "personal data privacy data processing "
+            "agreement GDPR and data subject "
+            "rights"
+        ),
+    ),
+    (
+        "ai_governance",
+        (
+            "artificial intelligence and machine "
+            "learning use governance and use of "
+            "customer data for model training"
+        ),
+    ),
+)
+
+
+# Every category the assessment actively searches for. "other" is
+# allowed for findings but has no dedicated retrieval query.
+ASSESSED_CATEGORIES = tuple(
+    dict.fromkeys(
+        topic for topic, _ in RETRIEVAL_QUERIES
+    )
 )
 
 
@@ -299,6 +365,10 @@ class RiskAnalysisService:
             indent=2,
         )
 
+        assessed_categories = ", ".join(
+            ASSESSED_CATEGORIES
+        )
+
         return f"""
 You are analyzing retrieved vendor security evidence.
 
@@ -372,6 +442,22 @@ For each finding:
   from the supplied evidence.
 
 - confidence must be between 0 and 1.
+
+CATEGORY COVERAGE
+
+Return one category_coverage entry for each of these
+categories: {assessed_categories}.
+
+- status "assessed" when the supplied evidence
+  substantively addresses that category's controls,
+  whether or not it produced findings.
+- status "insufficient_evidence" when the supplied
+  evidence does not meaningfully address the category.
+- note: one short sentence (under 300 characters)
+  describing what the evidence covers or what is
+  missing. Use only the supplied evidence.
+- Coverage entries are not findings. Do not create a
+  finding only because a category lacks evidence.
 
 RETRIEVED EVIDENCE
 
@@ -899,6 +985,9 @@ RETRIEVED EVIDENCE
         return EvidenceAnalysis(
             summary=normalized_summary,
             findings=deduplicated,
+            category_coverage=(
+                analysis.category_coverage
+            ),
         )
 
     async def _run_llm(
@@ -1097,6 +1186,12 @@ RETRIEVED EVIDENCE
             normalized_finding_count,
         )
 
+        coverage = self.build_coverage(
+            analysis=normalized,
+            evidence=evidence,
+            evidence_topics=evidence_topics,
+        )
+
         return VendorRiskAnalysisResult(
             vendor_id=vendor_id,
             model=self.model,
@@ -1105,6 +1200,7 @@ RETRIEVED EVIDENCE
                 normalized.findings
             ),
             evidence=evidence_output,
+            coverage=coverage,
             raw_finding_count=(
                 raw_finding_count
             ),
@@ -1112,6 +1208,93 @@ RETRIEVED EVIDENCE
                 normalized_finding_count
             ),
         )
+
+    @staticmethod
+    def build_coverage(
+        *,
+        analysis: EvidenceAnalysis,
+        evidence: list[
+            RetrievalResult
+        ],
+        evidence_topics: dict[
+            str,
+            set[str],
+        ],
+    ) -> list[CategoryCoverageResult]:
+        """
+        Combine retrieval facts with the model's
+        coverage judgement for every assessed category.
+
+        Deterministic rules take precedence:
+        - nothing retrieved -> no_evidence
+        - at least one finding -> assessed
+        Otherwise the model's status is used, and a
+        category the model omitted is not_reported.
+        """
+        similarity_by_id = {
+            item.chunk_id: item.similarity
+            for item in evidence
+        }
+
+        reported = {}
+        for item in analysis.category_coverage:
+            reported.setdefault(item.category, item)
+
+        coverage: list[CategoryCoverageResult] = []
+
+        for category in ASSESSED_CATEGORIES:
+            chunk_ids = [
+                chunk_id
+                for chunk_id, topics
+                in evidence_topics.items()
+                if category in topics
+            ]
+            similarities = [
+                similarity_by_id[chunk_id]
+                for chunk_id in chunk_ids
+                if chunk_id in similarity_by_id
+            ]
+            finding_count = sum(
+                1
+                for finding in analysis.findings
+                if finding.category == category
+            )
+            model_entry = reported.get(category)
+            note = (
+                model_entry.note
+                if model_entry is not None
+                else ""
+            )
+
+            if not chunk_ids:
+                status = "no_evidence"
+                note = (
+                    "No document content was "
+                    "retrieved for this category."
+                )
+            elif finding_count:
+                status = "assessed"
+            elif model_entry is not None:
+                status = model_entry.status
+            else:
+                status = "not_reported"
+
+            coverage.append(
+                CategoryCoverageResult(
+                    category=category,
+                    status=status,
+                    evidence_chunks=len(chunk_ids),
+                    top_similarity=(
+                        round(max(similarities), 6)
+                        if similarities
+                        else None
+                    ),
+                    finding_count=finding_count,
+                    note=note,
+                )
+            )
+
+        return coverage
 
     def close(
         self,
