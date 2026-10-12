@@ -212,15 +212,15 @@ def test_processing_renews_document_claim_for_each_batch(monkeypatch, runtime) -
     renew_claim = AsyncMock()
     monkeypatch.setattr(worker, "update_document_status", renew_claim)
 
-    async def embed_after_renewal(**kwargs):
+    async def embed_after_renewal(documents):
         # Claim renewal must precede work on each batch.
-        assert renew_claim.await_count == service.embed_document.await_count
-        return [0.1] * 768
+        assert renew_claim.await_count == service.embed_documents.await_count
+        return [[0.1] * 768 for _ in documents]
 
     service = SimpleNamespace(
         model="test-model",
         dimensions=768,
-        embed_document=AsyncMock(side_effect=embed_after_renewal),
+        embed_documents=AsyncMock(side_effect=embed_after_renewal),
     )
     result = asyncio.run(
         worker.process_document(

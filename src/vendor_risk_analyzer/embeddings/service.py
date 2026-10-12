@@ -21,6 +21,10 @@ class EmbeddingError(RuntimeError):
     """Raised when an embedding cannot be generated safely."""
 
 
+class EmbeddingBatchUnsupported(EmbeddingError):
+    """The provider did not return one embedding per batch input."""
+
+
 class EmbeddingService:
     """
     Generate embeddings using the Gemini API.
@@ -87,6 +91,10 @@ class EmbeddingService:
         self.client = genai.Client(
             api_key=self.api_key,
         )
+
+        # Cleared if the provider answers a batch request with a
+        # different number of embeddings than inputs.
+        self.batch_supported = True
 
     @staticmethod
     def prepare_document(
@@ -244,6 +252,125 @@ class EmbeddingService:
             "Embedding request failed after "
             f"{self.max_attempts} attempts."
         ) from last_error
+
+    async def _embed_batch(
+        self,
+        prepared_texts: list[str],
+    ) -> list[list[float]]:
+        """
+        Send several prepared strings in one request.
+
+        Uses the same retry/backoff as _embed. A response
+        with the wrong number of embeddings is not retried:
+        it means batching is unsupported for this model.
+        """
+        last_error: Exception | None = None
+
+        for attempt in range(
+            1,
+            self.max_attempts + 1,
+        ):
+            try:
+                response = (
+                    await self.client.aio.models.embed_content(
+                        model=self.model,
+                        contents=prepared_texts,
+                        config=types.EmbedContentConfig(
+                            output_dimensionality=self.dimensions,
+                        ),
+                    )
+                )
+
+                embeddings = response.embeddings or []
+
+                if len(embeddings) != len(prepared_texts):
+                    raise EmbeddingBatchUnsupported(
+                        "Expected "
+                        f"{len(prepared_texts)} embeddings, "
+                        f"received {len(embeddings)}."
+                    )
+
+                return [
+                    self._validate_embedding(
+                        embedding.values
+                    )
+                    for embedding in embeddings
+                ]
+
+            except EmbeddingError:
+                raise
+
+            except Exception as exc:
+                last_error = exc
+
+                logger.warning(
+                    "Batch embedding request failed "
+                    "(attempt %s/%s, inputs=%s): %s",
+                    attempt,
+                    self.max_attempts,
+                    len(prepared_texts),
+                    exc,
+                )
+
+                if attempt == self.max_attempts:
+                    break
+
+                await asyncio.sleep(
+                    2 ** (attempt - 1)
+                )
+
+        raise EmbeddingError(
+            "Batch embedding request failed after "
+            f"{self.max_attempts} attempts."
+        ) from last_error
+
+    async def embed_documents(
+        self,
+        documents: Sequence[
+            tuple[str, str | None]
+        ],
+    ) -> list[list[float]]:
+        """
+        Embed several (content, title) chunks, in one request
+        when the provider supports it.
+
+        Falls back to one request per chunk, and stops trying
+        batches for this service, if the provider does not
+        return exactly one embedding per input.
+        """
+        prepared_texts = [
+            self.prepare_document(
+                content=content,
+                title=title,
+            )
+            for content, title in documents
+        ]
+
+        if not prepared_texts:
+            return []
+
+        if (
+            len(prepared_texts) > 1
+            and getattr(self, "batch_supported", True)
+        ):
+            try:
+                return await self._embed_batch(
+                    prepared_texts
+                )
+            except EmbeddingBatchUnsupported as exc:
+                self.batch_supported = False
+                logger.warning(
+                    "Embedding model %s does not support "
+                    "batch inputs (%s). Falling back to "
+                    "one request per chunk.",
+                    self.model,
+                    exc,
+                )
+
+        return [
+            await self._embed(text)
+            for text in prepared_texts
+        ]
 
     async def embed_document(
         self,

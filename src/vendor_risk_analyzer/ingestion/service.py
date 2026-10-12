@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 import time
 
@@ -16,8 +17,12 @@ from vendor_risk_analyzer.ingestion.chunker import (
 from vendor_risk_analyzer.ingestion.parsers.registry import (
     get_parser,
 )
+from vendor_risk_analyzer.schemas.document import (
+    MAX_FILE_SIZE,
+)
 from vendor_risk_analyzer.storage.client import (
     download_object,
+    get_object_metadata,
 )
 
 
@@ -90,10 +95,52 @@ async def ingest_document(
             document.id,
         )
 
+        # Check the stored object's size before downloading it.
+        # The browser uploads directly to storage, so the stored
+        # object is not trusted until it matches the record.
+        metadata = await asyncio.to_thread(
+            get_object_metadata,
+            document.object_key,
+        )
+
+        if metadata is None:
+            raise ValueError(
+                "Uploaded file was not found in storage."
+            )
+
+        stored_size = metadata.get("ContentLength")
+
+        if (
+            not isinstance(stored_size, int)
+            or stored_size > MAX_FILE_SIZE
+            or (
+                document.size_bytes is not None
+                and stored_size != document.size_bytes
+            )
+        ):
+            raise ValueError(
+                "Stored file size does not match "
+                "the uploaded document."
+            )
+
         raw_content = await asyncio.to_thread(
             download_object,
             document.object_key,
         )
+
+        # Size can change between the check and the download,
+        # and equal sizes do not prove equal content.
+        if (
+            document.size_bytes is not None
+            and len(raw_content) != document.size_bytes
+        ) or (
+            hashlib.sha256(raw_content).hexdigest()
+            != document.sha256
+        ):
+            raise ValueError(
+                "Stored file does not match the "
+                "uploaded document's SHA-256 hash."
+            )
 
         download_duration = (
             time.perf_counter()

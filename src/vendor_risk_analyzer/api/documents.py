@@ -71,17 +71,43 @@ async def create_upload_url(
 ):
     await require_vendor_access(db, user, vendor_id)
 
-    existing = await db.execute(
-        select(Document).where(
-            Document.vendor_id == vendor_id,
-            Document.sha256 == payload.sha256,
+    existing = (
+        await db.execute(
+            select(Document).where(
+                Document.vendor_id == vendor_id,
+                Document.sha256 == payload.sha256,
+            )
         )
-    )
+    ).scalar_one_or_none()
 
-    if existing.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="This document has already been uploaded",
+    if existing is not None:
+        if (
+            existing.status != "upload_pending"
+            or existing.size_bytes != payload.size_bytes
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This document has already been uploaded",
+            )
+
+        # Resume an upload that was never completed (closed tab,
+        # network error, expired URL): issue a fresh URL for the
+        # same record instead of blocking this file forever.
+        upload_url = generate_upload_url(
+            object_key=existing.object_key,
+            content_type=payload.content_type,
+            expires_in=300,
+        )
+
+        existing.mime_type = payload.content_type
+
+        await db.commit()
+
+        return DocumentUploadResponse(
+            document_id=existing.id,
+            upload_url=upload_url,
+            object_key=existing.object_key,
+            expires_in=300,
         )
 
     document_id = uuid4()

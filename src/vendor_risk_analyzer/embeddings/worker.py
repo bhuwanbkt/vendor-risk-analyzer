@@ -237,6 +237,8 @@ async def process_document(
                 status="embedding",
             )
 
+            documents = []
+
             for chunk in chunks:
                 metadata = (
                     normalize_metadata(
@@ -244,33 +246,45 @@ async def process_document(
                     )
                 )
 
-                title = (
-                    build_embedding_title(
-                        metadata
+                documents.append(
+                    (
+                        str(
+                            chunk["content"]
+                        ).strip(),
+                        build_embedding_title(
+                            metadata
+                        ),
                     )
                 )
 
-                content = str(
-                    chunk["content"]
-                ).strip()
+            logger.info(
+                "Generating %s embedding(s) for "
+                "document %s sequences %s-%s",
+                len(chunks),
+                document_id,
+                chunks[0]["sequence"],
+                chunks[-1]["sequence"],
+            )
 
-                logger.info(
-                    "Generating embedding for "
-                    "document %s chunk %s "
-                    "sequence %s",
-                    document_id,
-                    chunk["id"],
-                    chunk["sequence"],
+            # One provider request per batch when supported;
+            # the service falls back to per-chunk requests.
+            embeddings = (
+                await embedding_service
+                .embed_documents(
+                    documents
+                )
+            )
+
+            if len(embeddings) != len(chunks):
+                raise RuntimeError(
+                    "Embedding count does not match "
+                    "the chunk batch."
                 )
 
-                embedding = (
-                    await embedding_service
-                    .embed_document(
-                        content=content,
-                        title=title,
-                    )
-                )
-
+            for chunk, embedding in zip(
+                chunks,
+                embeddings,
+            ):
                 await save_embedding(
                     engine,
                     chunk_id=str(
@@ -316,44 +330,46 @@ async def process_document(
                         "verification failed."
                     )
 
-                state = (
-                    await
-                    get_document_embedding_state(
-                        engine,
-                        document_id=(
-                            document_id
-                        ),
-                    )
+            state = (
+                await
+                get_document_embedding_state(
+                    engine,
+                    document_id=(
+                        document_id
+                    ),
                 )
+            )
 
+            logger.info(
+                "Document %s embedding "
+                "progress: %s/%s",
+                document_id,
+                state[
+                    "embedded_chunks"
+                ],
+                state[
+                    "total_chunks"
+                ],
+            )
+
+            # Pace provider requests once per batch rather
+            # than once per chunk.
+            if (
+                state[
+                    "missing_embeddings"
+                ] > 0
+                and delay_seconds > 0
+            ):
                 logger.info(
-                    "Document %s embedding "
-                    "progress: %s/%s",
-                    document_id,
-                    state[
-                        "embedded_chunks"
-                    ],
-                    state[
-                        "total_chunks"
-                    ],
+                    "Waiting %.1f seconds "
+                    "before next embedding "
+                    "request.",
+                    delay_seconds,
                 )
 
-                if (
-                    state[
-                        "missing_embeddings"
-                    ] > 0
-                    and delay_seconds > 0
-                ):
-                    logger.info(
-                        "Waiting %.1f seconds "
-                        "before next embedding "
-                        "request.",
-                        delay_seconds,
-                    )
-
-                    await asyncio.sleep(
-                        delay_seconds
-                    )
+                await asyncio.sleep(
+                    delay_seconds
+                )
 
     except asyncio.CancelledError:
         logger.info(
