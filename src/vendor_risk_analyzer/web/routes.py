@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession,
 )
 
+from vendor_risk_analyzer.embeddings.worker import worker_status
 from vendor_risk_analyzer.auth.dependencies import get_current_user, get_user_roles
 from vendor_risk_analyzer.auth.access import resolve_access
 from vendor_risk_analyzer.db.models import Tenant
@@ -927,6 +928,8 @@ async def system_page(
                 ),
             )
         ),
+        "worker_state": worker_status["state"],
+        "worker_detail": worker_status["detail"],
     }
 
 

@@ -157,3 +157,93 @@ def test_duplicate_chunk_ids_are_rejected() -> None:
                 evidence("chunk-a")
             ],
         )
+
+
+def signal(finding_type, chunk_ids, title="Grounding test finding"):
+    return RiskSignal(
+        finding_type=finding_type,
+        category="incident_response",
+        title=title,
+        description="A finding used for grounding repair tests.",
+        evidence_chunk_ids=chunk_ids,
+        confidence=0.8,
+    )
+
+
+def test_repair_keeps_valid_findings_and_drops_ungrounded_ones() -> None:
+    analysis = EvidenceAnalysis(
+        summary="Original model summary.",
+        findings=[
+            signal("explicit_risk", ["chunk-a"], "Valid finding kept"),
+            signal("explicit_risk", ["invented"], "Invented citation"),
+            signal("contradiction", ["chunk-a", "invented"], "Weak contradiction"),
+            signal("evidence_gap", ["chunk-a", "chunk-a", "chunk-b"], "Duplicate IDs"),
+        ],
+    )
+    available = [evidence("chunk-a"), evidence("chunk-b")]
+
+    repaired, dropped = service().repair_grounding(
+        analysis=analysis,
+        evidence=available,
+    )
+
+    assert dropped == 2
+    assert [finding.title for finding in repaired.findings] == [
+        "Valid finding kept",
+        "Duplicate IDs",
+    ]
+    assert repaired.findings[1].evidence_chunk_ids == ["chunk-a", "chunk-b"]
+    # The repaired analysis passes the strict validator.
+    service().validate_analysis(analysis=repaired, evidence=available)
+
+
+def test_repair_removes_invented_ids_but_keeps_grounded_finding() -> None:
+    analysis = EvidenceAnalysis(
+        summary="Original model summary.",
+        findings=[signal("explicit_risk", ["invented", "chunk-b"])],
+    )
+
+    repaired, dropped = service().repair_grounding(
+        analysis=analysis,
+        evidence=[evidence("chunk-b")],
+    )
+
+    assert dropped == 0
+    assert repaired.findings[0].evidence_chunk_ids == ["chunk-b"]
+
+
+def test_dropped_findings_rebuild_the_summary(monkeypatch) -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    analyzer = service()
+    analyzer.model = "test-model"
+
+    async def collect_evidence(**kwargs):
+        return [evidence("chunk-a")], {"chunk-a": {"incident_response"}}
+
+    async def run_llm(**kwargs):
+        return EvidenceAnalysis(
+            summary="Mentions an invented finding that will be dropped.",
+            findings=[
+                signal("explicit_risk", ["chunk-a"], "Grounded finding"),
+                signal("explicit_risk", ["invented"], "Invented finding"),
+            ],
+        )
+
+    async def commit():
+        return None
+
+    analyzer.collect_evidence = collect_evidence
+    analyzer._run_llm = run_llm
+
+    result = asyncio.run(
+        analyzer.analyze_vendor(
+            db=SimpleNamespace(commit=commit), vendor_id="vendor-1"
+        )
+    )
+
+    assert result.dropped_finding_count == 1
+    assert [finding.title for finding in result.findings] == ["Grounded finding"]
+    assert "Invented" not in result.summary
+    assert "Grounded finding" in result.summary

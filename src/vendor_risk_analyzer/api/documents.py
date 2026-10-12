@@ -1,5 +1,6 @@
 import asyncio
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -9,7 +10,7 @@ from fastapi import (
     HTTPException,
     status,
 )
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from vendor_risk_analyzer.auth.access import require_vendor_access
@@ -26,7 +27,7 @@ from vendor_risk_analyzer.schemas.document import (
     DocumentResponse,
     DocumentUploadRequest,
     DocumentUploadResponse,
-    is_stale_processing,
+    STALE_PROCESSING_AFTER,
 )
 from vendor_risk_analyzer.storage.client import (
     generate_upload_url,
@@ -40,6 +41,17 @@ from vendor_risk_analyzer.ingestion.service import (
 router = APIRouter(
     prefix="/api/vendors",
     tags=["Documents"],
+)
+
+
+# Statuses from which a document may be (re)processed.
+REINGESTABLE_STATUSES = (
+    "uploaded",
+    "parsed",
+    "failed",
+    "embedding_pending",
+    "embedding_failed",
+    "ready",
 )
 
 
@@ -297,16 +309,40 @@ async def ingest_uploaded_document(
             detail="Document not found",
         )
 
-    if document.status not in {
-        "uploaded",
-        "parsed",
-        "failed",
-        "embedding_pending",
-        "embedding_failed",
-        "ready",
-    } and not is_stale_processing(
-        document.status, document.updated_at
-    ):
+    # Claim the document atomically: the status check and the
+    # switch to "processing" are one conditional UPDATE, so two
+    # simultaneous requests (or a request racing the embedding
+    # worker's claim) cannot both start processing.
+    now = datetime.now(timezone.utc)
+
+    claim = await db.execute(
+        update(Document)
+        .where(
+            Document.id == document_id,
+            Document.vendor_id == vendor_id,
+            or_(
+                Document.status.in_(
+                    REINGESTABLE_STATUSES
+                ),
+                and_(
+                    Document.status == "processing",
+                    Document.updated_at
+                    < now - STALE_PROCESSING_AFTER,
+                ),
+            ),
+        )
+        .values(
+            status="processing",
+            updated_at=now,
+        )
+        .execution_options(
+            synchronize_session=False,
+        )
+    )
+
+    if claim.rowcount != 1:
+        await db.rollback()
+
         raise HTTPException(
             status_code=409,
             detail=(

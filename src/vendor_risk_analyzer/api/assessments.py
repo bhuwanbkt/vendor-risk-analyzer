@@ -182,7 +182,7 @@ async def create_assessment(
     - LLM findings must cite retrieved evidence
     - LLM does not assign final severity
     - deterministic policy assigns severity
-    - no numeric overall score is invented
+    - the risk score is computed by deterministic policy, not the LLM
     """
     access = await require_vendor_access(db, user, vendor_id)
 
@@ -325,7 +325,7 @@ async def create_assessment(
         # assessment.overall_risk
         # assessment.metadata
         #
-        # It does NOT invent an overall_score.
+        # It also sets overall_score from finding severities.
         # ====================================================
 
         policy_service = (

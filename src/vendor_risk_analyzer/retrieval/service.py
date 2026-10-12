@@ -21,6 +21,92 @@ logger = logging.getLogger(
 )
 
 
+# ------------------------------------------------------------
+# HNSW iterative scans (pgvector >= 0.8)
+#
+# The HNSW index returns its nearest candidates across ALL
+# vendors before the vendor/status filters apply. For a vendor
+# whose chunks are a small share of the table, that can leave
+# fewer results than requested. Iterative scans keep searching
+# until enough rows pass the filters. Older pgvector versions
+# do not have the setting, so it is enabled only when supported.
+# ------------------------------------------------------------
+
+_iterative_scan_supported: bool | None = None
+
+
+def version_at_least(
+    version: str | None,
+    minimum: tuple[int, ...],
+) -> bool:
+    if not isinstance(version, str):
+        return False
+
+    parts = []
+
+    for part in version.split("."):
+        digits = "".join(
+            char for char in part if char.isdigit()
+        )
+        if not digits:
+            break
+        parts.append(int(digits))
+
+    if not parts:
+        return False
+
+    return tuple(parts) >= minimum
+
+
+async def enable_iterative_scan(
+    db: AsyncSession,
+) -> bool:
+    """Enable relaxed iterative HNSW scans for this transaction."""
+    global _iterative_scan_supported
+
+    if _iterative_scan_supported is None:
+        try:
+            # A savepoint keeps a failed lookup from aborting
+            # the caller's transaction.
+            async with db.begin_nested():
+                version = (
+                    await db.execute(
+                        text(
+                            "SELECT extversion FROM pg_extension "
+                            "WHERE extname = 'vector'"
+                        )
+                    )
+                ).scalar_one_or_none()
+        except Exception:
+            logger.warning(
+                "Could not read pgvector version; "
+                "iterative HNSW scans stay disabled.",
+                exc_info=True,
+            )
+            version = None
+
+        _iterative_scan_supported = version_at_least(
+            version,
+            (0, 8),
+        )
+
+        logger.info(
+            "pgvector version=%s iterative_scan=%s",
+            version,
+            _iterative_scan_supported,
+        )
+
+    if _iterative_scan_supported:
+        # SET LOCAL lasts only for the current transaction.
+        await db.execute(
+            text(
+                "SET LOCAL hnsw.iterative_scan = relaxed_order"
+            )
+        )
+
+    return _iterative_scan_supported
+
+
 class VendorNotFoundError(ValueError):
     """Raised when the requested vendor does not exist."""
 
@@ -483,6 +569,8 @@ class SemanticRetriever:
         )
 
         try:
+            await enable_iterative_scan(db)
+
             result = await db.execute(
                 text(sql),
                 params,
@@ -557,6 +645,12 @@ class SemanticRetriever:
             )
             for row in rows
         ]
+
+        # relaxed_order iterative scans may return rows slightly
+        # out of distance order; restore exact ordering.
+        results.sort(
+            key=lambda item: item.cosine_distance
+        )
 
         total_duration = (
             time.perf_counter()

@@ -530,6 +530,88 @@ RETRIEVED EVIDENCE
                     )
                 )
 
+    def repair_grounding(
+        self,
+        *,
+        analysis: EvidenceAnalysis,
+        evidence: list[
+            RetrievalResult
+        ],
+    ) -> tuple[EvidenceAnalysis, int]:
+        """
+        Keep the verifiable part of a model response instead
+        of failing the whole assessment on one bad citation.
+
+        - Duplicate chunk IDs are collapsed.
+        - Chunk IDs that were not retrieved are removed.
+        - A finding left with no valid evidence (or a
+          contradiction left with fewer than two chunks)
+          is dropped.
+
+        Returns the repaired analysis and the number of
+        dropped findings. validate_analysis still runs
+        afterwards as a strict final check.
+        """
+        allowed_chunk_ids = {
+            item.chunk_id
+            for item in evidence
+        }
+
+        kept: list[RiskSignal] = []
+        dropped = 0
+        removed_ids = 0
+
+        for finding in analysis.findings:
+            unique_ids = list(
+                dict.fromkeys(
+                    finding.evidence_chunk_ids
+                )
+            )
+            valid_ids = [
+                chunk_id
+                for chunk_id in unique_ids
+                if chunk_id in allowed_chunk_ids
+            ]
+            removed_ids += len(unique_ids) - len(valid_ids)
+
+            minimum = (
+                2
+                if finding.finding_type == "contradiction"
+                else 1
+            )
+
+            if len(valid_ids) < minimum:
+                dropped += 1
+                continue
+
+            kept.append(
+                finding.model_copy(
+                    update={
+                        "evidence_chunk_ids": valid_ids,
+                    }
+                )
+            )
+
+        if dropped or removed_ids:
+            logger.warning(
+                "Risk analysis grounding repaired. "
+                "dropped_findings=%s "
+                "removed_chunk_ids=%s",
+                dropped,
+                removed_ids,
+            )
+
+        return (
+            EvidenceAnalysis(
+                summary=analysis.summary,
+                findings=kept,
+                category_coverage=(
+                    analysis.category_coverage
+                ),
+            ),
+            dropped,
+        )
+
     @staticmethod
     def _token_overlap(
         left: str,
@@ -1135,13 +1217,24 @@ RETRIEVED EVIDENCE
             )
         )
 
-        self.validate_analysis(
+        raw_finding_count = len(
+            analysis.findings
+        )
+
+        original_summary = analysis.summary
+
+        (
+            analysis,
+            dropped_finding_count,
+        ) = self.repair_grounding(
             analysis=analysis,
             evidence=evidence,
         )
 
-        raw_finding_count = len(
-            analysis.findings
+        # Strict final check; the repaired analysis must pass.
+        self.validate_analysis(
+            analysis=analysis,
+            evidence=evidence,
         )
 
         normalized = (
@@ -1149,6 +1242,18 @@ RETRIEVED EVIDENCE
                 analysis,
                 evidence=evidence,
             )
+        )
+
+        # The model's summary may describe dropped or merged
+        # findings; rebuild it whenever the set changed.
+        normalized = normalized.model_copy(
+            update={
+                "summary": self._normalized_summary(
+                    original_summary=original_summary,
+                    raw_finding_count=raw_finding_count,
+                    findings=normalized.findings,
+                ),
+            }
         )
 
         normalized_finding_count = len(
@@ -1206,6 +1311,9 @@ RETRIEVED EVIDENCE
             ),
             normalized_finding_count=(
                 normalized_finding_count
+            ),
+            dropped_finding_count=(
+                dropped_finding_count
             ),
         )
 
