@@ -86,6 +86,17 @@ summary, and exits non-zero if any assessment failed.
 The dispatcher defaults to non-writing behavior unless `OPS_WRITE`
 is explicitly truthy.
 
+### Run the quality evaluation
+
+```text
+OPS_TASK=run_eval
+OPS_EVAL_CASES=larkspur=<vendor UUID>,brightwater=<vendor UUID>
+OPS_EVAL_RUNS=3
+```
+
+Read-only: runs live analysis and scores it against
+`src/vendor_risk_analyzer/evaluation/cases.json`; nothing is saved.
+
 ## Smoke scripts
 
 `scripts/smoke/` contains cloud/integration verification utilities.

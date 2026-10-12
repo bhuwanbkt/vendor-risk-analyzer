@@ -374,6 +374,31 @@ After changing roles, sign out and sign in again to refresh the application
 session. Close every Incognito window before testing a fresh Incognito session.
 Provider account selection and session termination still need a live browser check.
 
+## Quality Evaluation
+
+`evals/fixtures/` holds documents for two fictional vendors with planted issues:
+Larkspur (contradictions, open pentest findings, missing evidence) and Brightwater
+(an outdated incident plan and AI training on customer files by default).
+`src/vendor_risk_analyzer/evaluation/cases.json` lists the issues each assessment
+should find, categories that should stay clean, expected coverage, and the
+expected overall risk.
+
+To run it: create one vendor per case, upload its fixture documents, wait until
+they are `ready`, then run the utility job with:
+
+```dotenv
+OPS_TASK=run_eval
+OPS_EVAL_CASES=larkspur=<vendor-uuid>,brightwater=<vendor-uuid>
+OPS_EVAL_RUNS=3
+```
+
+The evaluation runs the real retrieval, model, and policy rules without saving an
+assessment, prints which planted issues were found or missed in each run, and
+summarizes detection rates across runs (the model is not deterministic). It exits
+non-zero unless every run passes. Run it before and after changing prompts,
+retrieval, or models, and compare the detection rates. Each run makes live Gemini
+calls.
+
 ## Background Assessments
 
 Assessments move through `queued` → `running` → `completed` or `failed`. The

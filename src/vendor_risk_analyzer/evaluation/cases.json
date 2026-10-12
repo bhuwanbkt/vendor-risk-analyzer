@@ -1,0 +1,97 @@
+{
+  "larkspur": {
+    "documents": [
+      "larkspur_security_policy.md",
+      "larkspur_security_questionnaire.csv"
+    ],
+    "expected_findings": [
+      {
+        "id": "breach-notice-timeline",
+        "category": "incident_response",
+        "types": ["contradiction"],
+        "keywords_all": ["72", "24"],
+        "description": "Policy says 72 hours, questionnaire says 24 hours."
+      },
+      {
+        "id": "open-pentest-findings",
+        "category": "vulnerability_management",
+        "types": ["explicit_risk", "contradiction"],
+        "keywords_any": ["penetration", "pentest", "finding"],
+        "description": "Two high pentest findings remain open past SLA."
+      },
+      {
+        "id": "access-review-frequency",
+        "category": "access_control",
+        "types": ["contradiction"],
+        "keywords_any": ["quarterly", "annual", "review"],
+        "description": "Access reviews quarterly vs annually."
+      },
+      {
+        "id": "contractor-mfa",
+        "category": "access_control",
+        "types": ["explicit_risk", "contradiction"],
+        "keywords_any": ["mfa", "multi-factor"],
+        "description": "MFA not enforced for 14 contractor accounts."
+      },
+      {
+        "id": "missing-dr-test",
+        "category": "business_continuity",
+        "types": ["evidence_gap", "explicit_risk", "contradiction"],
+        "keywords_any": ["2025", "disaster recovery", "dr test"],
+        "description": "No evidence of a 2025 disaster recovery test."
+      },
+      {
+        "id": "subprocessor-soc2",
+        "category": "third_party",
+        "types": ["evidence_gap", "explicit_risk", "contradiction"],
+        "keywords_any": ["soc 2", "soc2", "subprocessor"],
+        "description": "SOC 2 reports missing for two subprocessors."
+      }
+    ],
+    "clean_categories": ["encryption", "data_retention", "privacy"],
+    "expected_coverage": {
+      "encryption": ["assessed"],
+      "data_retention": ["assessed"],
+      "privacy": ["assessed"],
+      "ai_governance": ["insufficient_evidence", "no_evidence"]
+    },
+    "expected_overall_risk": ["high"],
+    "min_recall": 0.8,
+    "max_false_positives": 0
+  },
+  "brightwater": {
+    "documents": ["brightwater_security_overview.md"],
+    "expected_findings": [
+      {
+        "id": "outdated-ir-plan",
+        "category": "incident_response",
+        "types": ["explicit_risk", "evidence_gap"],
+        "keywords_any": ["2023", "outdated", "region"],
+        "description": "Incident response plan not updated since 2023."
+      },
+      {
+        "id": "ai-training-default",
+        "category": "ai_governance",
+        "types": ["explicit_risk"],
+        "keywords_any": ["train", "model", "opt"],
+        "description": "Customer files used to improve models unless customers opt out."
+      }
+    ],
+    "clean_categories": [
+      "access_control",
+      "encryption",
+      "vulnerability_management",
+      "business_continuity",
+      "data_retention",
+      "third_party",
+      "privacy"
+    ],
+    "expected_coverage": {
+      "ai_governance": ["assessed"],
+      "encryption": ["assessed"]
+    },
+    "expected_overall_risk": ["high"],
+    "min_recall": 1.0,
+    "max_false_positives": 0
+  }
+}
