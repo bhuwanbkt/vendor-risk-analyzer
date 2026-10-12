@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 import logging
 import os
 import re
@@ -134,6 +135,27 @@ ASSESSED_CATEGORIES = tuple(
 )
 
 
+# Optional async callback(stage, message) for job progress.
+ProgressCallback = Callable[[str, str], Awaitable[None]]
+
+
+async def report_progress(
+    on_progress: ProgressCallback | None,
+    stage: str,
+    message: str,
+) -> None:
+    """Progress is informational; never fail the analysis over it."""
+    if on_progress is None:
+        return
+    try:
+        await on_progress(stage, message)
+    except Exception:
+        logger.warning(
+            "Assessment progress update failed.",
+            exc_info=True,
+        )
+
+
 class RiskAnalysisError(
     RuntimeError
 ):
@@ -225,6 +247,7 @@ class RiskAnalysisService:
         *,
         db: AsyncSession,
         vendor_id: str,
+        on_progress: ProgressCallback | None = None,
     ) -> tuple[
         list[RetrievalResult],
         dict[str, set[str]],
@@ -247,10 +270,18 @@ class RiskAnalysisService:
             set[str],
         ] = {}
 
-        for (
+        for index, (
             topic,
             query,
-        ) in RETRIEVAL_QUERIES:
+        ) in enumerate(RETRIEVAL_QUERIES, start=1):
+            await report_progress(
+                on_progress,
+                "retrieving",
+                "Searching evidence "
+                f"({index}/{len(RETRIEVAL_QUERIES)}): "
+                f"{topic.replace('_', ' ')}",
+            )
+
             logger.info(
                 "Risk analysis retrieval "
                 "started. vendor_id=%s "
@@ -1169,6 +1200,7 @@ RETRIEVED EVIDENCE
         *,
         db: AsyncSession,
         vendor_id: str,
+        on_progress: ProgressCallback | None = None,
     ) -> VendorRiskAnalysisResult:
         """
         Complete vendor risk-analysis workflow.
@@ -1188,6 +1220,7 @@ RETRIEVED EVIDENCE
         ) = await self.collect_evidence(
             db=db,
             vendor_id=vendor_id,
+            on_progress=on_progress,
         )
 
         if not evidence:
@@ -1209,6 +1242,12 @@ RETRIEVED EVIDENCE
             evidence_topics=(
                 evidence_topics
             ),
+        )
+
+        await report_progress(
+            on_progress,
+            "analyzing",
+            f"Analyzing {len(evidence)} evidence chunks with AI",
         )
 
         analysis = (

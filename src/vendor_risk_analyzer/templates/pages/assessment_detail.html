@@ -69,6 +69,67 @@
 </section>
 
 
+{% set progress = assessment.extra_data.get("progress") or {} %}
+
+{% if assessment.status in ("queued", "running") %}
+
+{% set stage_order = {"queued": 0, "starting": 1, "retrieving": 1, "analyzing": 2, "saving": 3, "scoring": 4} %}
+{% set current_step = stage_order.get(progress.get("stage"), 0) %}
+
+<section
+    class="report-section assessment-progress"
+    id="assessment-progress"
+    data-assessment-id="{{ assessment.id }}"
+>
+
+    <span class="eyebrow">
+        Assessment in progress
+    </span>
+
+    <h2 id="assessment-progress-message">
+        {{ progress.get("message") or "Waiting to start" }}
+    </h2>
+
+    <ol class="progress-steps" id="assessment-progress-steps">
+        {% for label in ["Queued", "Searching evidence", "AI analysis", "Saving findings", "Scoring"] %}
+        <li
+            data-step="{{ loop.index0 }}"
+            class="{{ 'done' if loop.index0 < current_step else ('current' if loop.index0 == current_step else '') }}"
+        >
+            {{ label }}
+        </li>
+        {% endfor %}
+    </ol>
+
+    <p class="coverage-hint">
+        This page updates automatically. You can leave and come back;
+        the assessment keeps running.
+    </p>
+
+</section>
+
+{% elif assessment.status == "failed" %}
+
+<section class="report-section assessment-failed">
+
+    <span class="eyebrow">
+        Assessment failed
+    </span>
+
+    <h2>
+        {{ assessment.extra_data.get("error") or "The assessment could not be completed." }}
+    </h2>
+
+    <p class="coverage-hint">
+        Check that the vendor's documents are ready, then run the
+        assessment again from the Assessments page.
+    </p>
+
+</section>
+
+{% endif %}
+
+
 <section class="report-stat-grid">
 
     <div class="report-stat">
@@ -139,6 +200,8 @@
 
 </section>
 
+
+{% if assessment.status == "completed" %}
 
 <section class="report-section">
 
@@ -372,6 +435,8 @@
 
 </section>
 
+{% endif %}
+
 
 {% set coverage = assessment.extra_data.get("category_coverage") or [] %}
 
@@ -492,4 +557,11 @@
 
 </details>
 
+{% endblock %}
+
+
+{% block scripts %}
+{% if assessment.status in ("queued", "running") %}
+<script src="/static/js/assessment_detail.js?v=1"></script>
+{% endif %}
 {% endblock %}

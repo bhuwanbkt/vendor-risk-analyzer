@@ -2240,3 +2240,53 @@ textarea {
     color: #b42318;
 }
 
+
+/* ============================================================
+   BACKGROUND ASSESSMENT PROGRESS
+   ============================================================ */
+
+.progress-steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+
+    margin: 16px 0 8px;
+    padding: 0;
+
+    list-style: none;
+}
+
+
+.progress-steps li {
+    padding: 6px 12px;
+
+    border: 1px solid var(--border);
+    border-radius: 999px;
+
+    color: var(--text-muted);
+
+    font-size: 12px;
+    font-weight: 600;
+}
+
+
+.progress-steps li.done {
+    border-color: transparent;
+
+    background: #ecfdf3;
+
+    color: #027a48;
+}
+
+
+.progress-steps li.current {
+    border-color: var(--primary);
+
+    color: var(--primary);
+}
+
+
+.assessment-failed h2 {
+    color: var(--red);
+}
+

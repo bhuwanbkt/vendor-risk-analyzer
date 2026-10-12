@@ -29,7 +29,7 @@ WRITE_CASES = [
     ),
     ("POST", "/api/vendors/{vendor_a}/documents/{document_a}/complete", None, 200),
     ("POST", "/api/vendors/{vendor_a}/documents/{document_a}/ingest", None, 200),
-    ("POST", "/api/vendors/{vendor_a}/assessments", None, 201),
+    ("POST", "/api/vendors/{vendor_a}/assessments", None, 202),
     (
         "POST",
         "/api/chat",

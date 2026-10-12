@@ -91,6 +91,8 @@ def security_api(monkeypatch):
         "OBJECT_STORAGE_ACCESS_KEY_ID": "test-access-key",
         "OBJECT_STORAGE_SECRET_ACCESS_KEY": "test-secret-key",
         "GEMINI_API_KEY": "test-not-a-real-api-key",
+        # Assessments are queued; no background worker in HTTP tests.
+        "ASSESSMENT_WORKER_ENABLED": "false",
     }
     for name, value in values.items():
         monkeypatch.setenv(name, value)
@@ -232,17 +234,12 @@ def security_api(monkeypatch):
             return_value=SimpleNamespace(proposed_overall_risk="medium")
         )
     )
-    for module in (chat, assessments):
-        monkeypatch.setattr(module, "EmbeddingService", cloud.embedding_factory)
+    monkeypatch.setattr(chat, "EmbeddingService", cloud.embedding_factory)
     monkeypatch.setattr(documents, "generate_upload_url", cloud.upload_url)
     monkeypatch.setattr(documents, "get_object_metadata", cloud.object_metadata)
     monkeypatch.setattr(documents, "ingest_document", cloud.ingest)
     monkeypatch.setattr(chat, "ChatService", cloud.chat_factory)
-    monkeypatch.setattr(assessments, "RiskAnalysisService", cloud.risk_factory)
-    monkeypatch.setattr(
-        assessments, "AssessmentPersistenceService", cloud.persistence_factory
-    )
-    monkeypatch.setattr(assessments, "RiskPolicyService", cloud.policy_factory)
+    # Assessment analysis runs in the background worker, not the API.
 
     signer = TimestampSigner(main.settings.session_secret)
     with TestClient(

@@ -198,10 +198,15 @@ class AssessmentPersistenceService:
         *,
         db: AsyncSession,
         analysis: VendorRiskAnalysisResult,
+        assessment_id: UUID | None = None,
     ) -> AssessmentPersistenceResult:
         """
         Persist one completed AI evidence
         assessment and its grounded findings.
+
+        With assessment_id, the results are written into an
+        existing queued/running assessment (background jobs);
+        otherwise a new completed assessment is created.
 
         This method intentionally does NOT
         calculate severity, overall risk,
@@ -255,17 +260,7 @@ class AssessmentPersistenceService:
             timezone.utc
         )
 
-        assessment = Assessment(
-            vendor_id=vendor_id,
-            status="completed",
-            assessment_type=(
-                ASSESSMENT_TYPE
-            ),
-            overall_score=None,
-            overall_risk=None,
-            started_at=now,
-            completed_at=now,
-            extra_data={
+        analysis_metadata = {
                 "analysis_model":
                     analysis.model,
                 "analysis_summary":
@@ -290,12 +285,57 @@ class AssessmentPersistenceService:
                     "unrated-v1",
                 "persistence_version":
                     "1.0",
-            },
-        )
+        }
 
-        db.add(
-            assessment
-        )
+        if assessment_id is None:
+            assessment = Assessment(
+                vendor_id=vendor_id,
+                status="completed",
+                assessment_type=(
+                    ASSESSMENT_TYPE
+                ),
+                overall_score=None,
+                overall_risk=None,
+                started_at=now,
+                completed_at=now,
+                extra_data=analysis_metadata,
+            )
+
+            db.add(
+                assessment
+            )
+
+        else:
+            assessment = await db.get(
+                Assessment,
+                assessment_id,
+            )
+
+            if (
+                assessment is None
+                or assessment.vendor_id != vendor_id
+            ):
+                raise AssessmentPersistenceError(
+                    "Queued assessment not found for vendor."
+                )
+
+            # Status stays "running": the job marks the assessment
+            # completed only after the risk policy is applied.
+            assessment.assessment_type = ASSESSMENT_TYPE
+            assessment.overall_score = None
+            assessment.overall_risk = None
+            assessment.started_at = (
+                assessment.started_at or now
+            )
+            # Keep job metadata (requester, progress history).
+            assessment.extra_data = {
+                **(assessment.extra_data or {}),
+                **analysis_metadata,
+                "progress": {
+                    "stage": "saving",
+                    "message": "Saving findings",
+                },
+            }
 
         persisted_findings: list[
             PersistedFinding

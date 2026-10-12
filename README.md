@@ -41,7 +41,8 @@ flowchart TD
     S --> G[Gemini]
 ```
 
-The embedding worker and optional MCP transport run inside the FastAPI process.
+The embedding worker, the background assessment worker, and the optional MCP
+transport run inside the FastAPI process.
 Compose provides the application, database, and object storage locally. ZITADEL
 and Gemini remain external services.
 
@@ -51,7 +52,9 @@ and Gemini remain external services.
 2. The browser uploads the original file to private object storage using a signed URL.
 3. Document processing selects a parser, saves structural elements, and creates retrieval chunks.
 4. The document enters `embedding_pending`. The worker embeds missing chunks, verifies the stored vectors, and marks the document `ready` when processing is complete.
-5. Assessment retrieval searches ready documents for the selected vendor across risk-analysis topics and combines repeated evidence hits.
+5. Running an assessment queues it (HTTP 202). The background assessment worker claims queued
+   assessments one at a time and records progress, which the report page shows live.
+   Retrieval searches ready documents for the selected vendor across risk-analysis topics and combines repeated evidence hits.
 6. Gemini returns a structured summary and findings. Grounding checks verify cited chunk IDs against the retrieved evidence.
 7. Deterministic logic consolidates duplicate findings and rebuilds the summary when the finding set changes, without another LLM call.
 8. The application persists the assessment and findings, applies deterministic risk policy, and displays the saved report.
@@ -371,6 +374,17 @@ After changing roles, sign out and sign in again to refresh the application
 session. Close every Incognito window before testing a fresh Incognito session.
 Provider account selection and session termination still need a live browser check.
 
+## Background Assessments
+
+Assessments move through `queued` → `running` → `completed` or `failed`. The
+worker uses its own database connections, claims work with `FOR UPDATE SKIP
+LOCKED` (safe with several replicas), and stores progress in the assessment's
+metadata. An assessment interrupted by shutdown returns to `queued` and resumes
+after restart; one left `running` without progress for `ASSESSMENT_STALE_MINUTES`
+(default 15) is marked failed instead of retried, so a failing run cannot loop on
+Gemini usage. Settings: `ASSESSMENT_WORKER_ENABLED` (default true),
+`ASSESSMENT_WORKER_POLL_SECONDS` (default 5), `ASSESSMENT_STALE_MINUTES`.
+
 ## Security Headers and Rate Limits
 
 Every response carries a strict Content-Security-Policy (same-origin scripts and
@@ -399,7 +413,7 @@ The main application endpoints are:
 | POST | `/api/vendors/{vendor_id}/documents/upload-url` | Request a signed upload URL |
 | POST | `/api/vendors/{vendor_id}/documents/{document_id}/complete` | Confirm an uploaded object |
 | POST | `/api/vendors/{vendor_id}/documents/{document_id}/ingest` | Parse the uploaded document and create chunks |
-| POST | `/api/vendors/{vendor_id}/assessments` | Create a grounded assessment and apply policy |
+| POST | `/api/vendors/{vendor_id}/assessments` | Queue an assessment (202); poll `GET /api/assessments/{id}` until `completed` or `failed` |
 | GET | `/api/assessments/{assessment_id}` | Read a saved report |
 | POST | `/api/chat` | Ask a question with an explicit vendor ID |
 

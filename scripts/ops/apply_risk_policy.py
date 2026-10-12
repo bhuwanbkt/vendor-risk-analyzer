@@ -37,7 +37,10 @@ async def list_outdated_assessments(db) -> list:
             Assessment.id,
             Assessment.overall_risk,
         )
-        .where(applied_version != POLICY_VERSION)
+        .where(
+            Assessment.status == "completed",
+            applied_version != POLICY_VERSION,
+        )
         .order_by(Assessment.created_at, Assessment.id)
     )
     return list(result.all())

@@ -66,7 +66,7 @@ def test_requests_rejected_by_csrf_do_not_use_quota(security_api, monkeypatch):
         assert security_api.client.post(url).status_code == 403
 
     allowed = security_api.client.post(url, headers={"X-CSRF-Token": "test-csrf-token"})
-    assert allowed.status_code == 201
+    assert allowed.status_code == 202
 
 
 def test_default_referrer_policy_applies_when_page_sets_none(security_api):
