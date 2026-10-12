@@ -77,6 +77,7 @@ def job(monkeypatch):
     monkeypatch.setattr(worker, "set_progress", set_progress)
     monkeypatch.setattr(worker, "mark_failed", AsyncMock())
     monkeypatch.setattr(worker, "requeue", AsyncMock())
+    monkeypatch.setattr(worker, "audit_job", AsyncMock())
 
     return SimpleNamespace(
         assessment=assessment,
@@ -154,3 +155,14 @@ def test_progress_callback_failures_do_not_fail_the_analysis():
 
     asyncio.run(report_progress(broken, "retrieving", "Searching"))
     asyncio.run(report_progress(None, "retrieving", "Searching"))
+
+
+def test_job_outcomes_are_audited(job):
+    run(job)
+    assert worker.audit_job.await_args.args[2] == "assessment.completed"
+
+    worker.audit_job.reset_mock()
+    job.analyze.side_effect = RiskAnalysisError("No retrieval evidence was found for vendor.")
+    run(job)
+    assert worker.audit_job.await_args.args[2] == "assessment.failed"
+

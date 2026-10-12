@@ -29,6 +29,7 @@ from starlette.applications import Starlette
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
 
+from vendor_risk_analyzer.audit.service import record as audit
 from vendor_risk_analyzer.rate_limit import RateLimitExceeded, enforce as enforce_rate_limit
 from vendor_risk_analyzer.assessments.repository import (
     AssessmentNotFoundError,
@@ -421,6 +422,15 @@ def create_mcp_application(
                     "Too many requests. Try again in "
                     f"{exc.retry_after} seconds."
                 ) from exc
+            await audit(
+                access,
+                None,
+                "chat.question_asked",
+                target_type="vendor",
+                target_id=vendor_id,
+                vendor_id=vendor_id,
+                details={"question_length": len(question), "via": "mcp"},
+            )
             embedding = None
             try:
                 embedding = EmbeddingService()

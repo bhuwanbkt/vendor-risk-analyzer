@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">
+            Company administration
+        </span>
+        <h2>
+            Audit log
+        </h2>
+        <p>
+            Who did what in this company, newest first. Chat events record
+            only that a question was asked, never its text.
+        </p>
+    </div>
+</section>
+
+
+<section class="content-card">
+
+    <form method="get" action="/admin/audit" class="audit-filter">
+        <label for="audit-action">Action</label>
+        <select id="audit-action" name="action">
+            <option value="">All actions</option>
+            {% for key, label in action_labels.items() %}
+            <option value="{{ key }}" {% if key == selected_action %}selected{% endif %}>
+                {{ label }}
+            </option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="secondary-button">Filter</button>
+    </form>
+
+    <div class="table-wrap">
+        <table class="data-table audit-table">
+            <thead>
+                <tr>
+                    <th>When (UTC)</th>
+                    <th>Who</th>
+                    <th>Action</th>
+                    <th>Vendor</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for event in events %}
+                <tr>
+                    <td>{{ (event.created_at or "")[:19] | replace("T", " ") }}</td>
+                    <td>
+                        {{ event.actor_name or "Unknown" }}
+                        {% if event.actor_subject %}
+                        <small>{{ event.actor_subject }}</small>
+                        {% endif %}
+                    </td>
+                    <td>{{ event.action_label }}</td>
+                    <td>{{ event.vendor_name or "" }}</td>
+                    <td>
+                        {% for key, value in event.details.items() %}
+                        <small>{{ key | replace("_", " ") }}: {{ value }}</small>
+                        {% endfor %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5">No events recorded yet.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+</section>
+
+{% endblock %}

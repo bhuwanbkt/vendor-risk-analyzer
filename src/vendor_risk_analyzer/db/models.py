@@ -522,3 +522,27 @@ class Finding(
             "severity",
         ),
     )
+
+
+class AuditEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Who did what, per company. Rows are append-only.
+
+    vendor_id is not a foreign key so events outlive deleted vendors.
+    """
+
+    __tablename__ = "audit_events"
+
+    tenant_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True
+    )
+    actor_subject: Mapped[str | None] = mapped_column(String(255))
+    actor_name: Mapped[str | None] = mapped_column(String(320))
+    action: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    target_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_id: Mapped[str | None] = mapped_column(String(64))
+    vendor_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    details: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+
+    __table_args__ = (
+        Index("ix_audit_events_tenant_created", "tenant_id", "created_at"),
+    )

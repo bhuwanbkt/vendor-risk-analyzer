@@ -9,6 +9,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from vendor_risk_analyzer.audit.service import record as audit
 from vendor_risk_analyzer.auth.access import resolve_access
 from vendor_risk_analyzer.auth.dependencies import require_roles, verify_csrf
 from vendor_risk_analyzer.db.models import TenantMembership, Vendor, VendorAssignment
@@ -127,10 +128,24 @@ async def add_member(payload: NewMember, db: DB, user: AdminUser, _: Csrf):
     db.add(member)
     try:
         await db.flush()
-        return await save_assignments(db, access, member, payload)
+        saved = await save_assignments(db, access, member, payload)
     except IntegrityError as exc:
         await db.rollback()
         raise HTTPException(409, "This company member already exists") from exc
+    await audit(
+        access,
+        user,
+        "access.member_added",
+        target_type="member",
+        target_id=saved["id"],
+        details={
+            "subject": payload.subject,
+            "access_mode": payload.access_mode,
+            "enabled": payload.enabled,
+            "vendor_count": len(set(payload.vendor_ids)),
+        },
+    )
+    return saved
 
 
 @router.put("/members/{member_id}")
@@ -152,7 +167,23 @@ async def update_member(
     )
     if member is None:
         raise HTTPException(404, "Company member not found")
-    return await save_assignments(db, access, member, payload)
+    previous = {"access_mode": member.access_mode, "enabled": member.enabled}
+    saved = await save_assignments(db, access, member, payload)
+    await audit(
+        access,
+        user,
+        "access.member_updated",
+        target_type="member",
+        target_id=member_id,
+        details={
+            "subject": saved["subject"],
+            "previous": previous,
+            "access_mode": payload.access_mode,
+            "enabled": payload.enabled,
+            "vendor_ids": sorted(str(v) for v in set(payload.vendor_ids)),
+        },
+    )
+    return saved
 
 
 class CompanyDefaults(BaseModel):
@@ -167,6 +198,15 @@ async def update_defaults(
     _: Csrf,
 ):
     access = await resolve_access(db, user)
+    previous = access.tenant.default_access
     access.tenant.default_access = payload.default_access
     await db.commit()
+    await audit(
+        access,
+        user,
+        "access.default_changed",
+        target_type="company",
+        target_id=access.tenant.id,
+        details={"previous": previous, "default_access": payload.default_access},
+    )
     return payload

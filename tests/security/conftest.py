@@ -186,6 +186,27 @@ def security_api(monkeypatch):
     session.commit()
     db = LocalAsyncSession(session)
 
+    # Audit writes use their own session in production; here they are
+    # collected in memory so tests can inspect them without touching db.calls.
+    audit_events = []
+
+    class AuditCollector:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def add(self, value):
+            audit_events.append(value)
+
+        async def commit(self):
+            return None
+
+    from vendor_risk_analyzer.audit import service as audit_service
+
+    monkeypatch.setattr(audit_service, "session_factory", AuditCollector)
+
     async def local_database():
         yield db
 
@@ -277,6 +298,7 @@ def security_api(monkeypatch):
             authenticate=authenticate,
             assert_no_work=assert_no_work,
             tenant=tenant,
+            audit_events=audit_events,
         )
 
     main.app.dependency_overrides.pop(get_db, None)

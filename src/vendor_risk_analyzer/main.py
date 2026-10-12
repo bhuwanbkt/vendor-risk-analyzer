@@ -47,6 +47,7 @@ from vendor_risk_analyzer.api.chat import (
     router as chat_router,
 )
 from vendor_risk_analyzer.api.access import router as access_router
+from vendor_risk_analyzer.api.audit import router as audit_router
 
 
 # ============================================================
@@ -260,6 +261,7 @@ app.include_router(
     chat_router
 )
 app.include_router(access_router)
+app.include_router(audit_router)
 
 
 # ============================================================

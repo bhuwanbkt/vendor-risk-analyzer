@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from fastapi.responses import RedirectResponse
 
+from vendor_risk_analyzer.audit.service import record as audit
 from vendor_risk_analyzer.auth.dependencies import get_current_user, verify_csrf
 from vendor_risk_analyzer.auth.oidc import oauth
 from vendor_risk_analyzer.auth.organizations import organization_roles, scoped_identity
@@ -187,7 +188,14 @@ async def select_company(payload: CompanySelection, request: Request,
         raise HTTPException(400, "Use X-Organization-ID with bearer requests")
     user = get_current_user(request)
     user = scoped_identity(user, payload.organization_id)
-    await resolve_access(db, user)
+    access = await resolve_access(db, user)
+    await audit(
+        access,
+        user,
+        "company.selected",
+        target_type="company",
+        target_id=access.tenant.id,
+    )
     request.session["user"] = user
     request.session["csrf_token"] = secrets.token_urlsafe(32)
     return {"redirect": "/dashboard"}

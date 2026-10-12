@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession,
 )
 
+from vendor_risk_analyzer.audit.service import record as audit
 from vendor_risk_analyzer.rate_limit import rate_limit
 from vendor_risk_analyzer.assessments import repository
 from vendor_risk_analyzer.assessments.service import ASSESSMENT_TYPE
@@ -191,6 +192,16 @@ async def export_assessment(
         format,
     )
 
+    await audit(
+        access,
+        user,
+        "assessment.exported",
+        target_type="assessment",
+        target_id=assessment_id,
+        vendor_id=response.vendor_id,
+        details={"format": format},
+    )
+
     return Response(
         content=content,
         media_type=media_type,
@@ -260,6 +271,15 @@ async def create_assessment(
     await db.commit()
 
     notify_new_assessment()
+
+    await audit(
+        access,
+        user,
+        "assessment.requested",
+        target_type="assessment",
+        target_id=assessment.id,
+        vendor_id=vendor_id,
+    )
 
     logger.info(
         "Assessment queued. vendor_id=%s assessment_id=%s",

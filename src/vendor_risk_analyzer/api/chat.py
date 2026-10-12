@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from vendor_risk_analyzer.audit.service import record as audit
 from vendor_risk_analyzer.rate_limit import rate_limit
 from vendor_risk_analyzer.auth.access import require_vendor_access
 
@@ -84,7 +85,21 @@ async def vendor_chat(
     vendor_id must always come explicitly
     from the application context.
     """
-    await require_vendor_access(db, user, payload.vendor_id)
+    access = await require_vendor_access(db, user, payload.vendor_id)
+
+    # Content is never logged; only that a question was asked.
+    await audit(
+        access,
+        user,
+        "chat.question_asked",
+        target_type="vendor",
+        target_id=payload.vendor_id,
+        vendor_id=payload.vendor_id,
+        details={
+            "question_length": len(payload.question),
+            "via": "web",
+        },
+    )
 
     logger.info(
         "Vendor chat API started. "

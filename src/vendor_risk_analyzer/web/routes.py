@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession,
 )
 
+from vendor_risk_analyzer.audit.service import ACTION_LABELS, list_events
 from vendor_risk_analyzer.embeddings.worker import worker_status
 from vendor_risk_analyzer.auth.dependencies import get_current_user, get_user_roles
 from vendor_risk_analyzer.auth.access import resolve_access
@@ -957,6 +958,30 @@ async def access_page(request: Request, db: AsyncSession = Depends(get_db)):
     return templates.TemplateResponse(request=request, name="pages/access.html",
         context=page_context(request=request, user=user, active_page="access",
                              page_title="Company access"))
+
+
+@router.get("/admin/audit", response_class=HTMLResponse)
+async def audit_page(
+    request: Request,
+    action: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    user = get_session_user(request)
+    access, response = await authorize_page(request, user, db, "admin")
+    if response is not None:
+        return response
+    selected_action = action if action in ACTION_LABELS else None
+    events = await list_events(
+        db,
+        tenant_id=access.tenant.id,
+        limit=200,
+        action=selected_action,
+    )
+    return templates.TemplateResponse(request=request, name="pages/audit.html",
+        context=page_context(request=request, user=user, active_page="audit",
+                             page_title="Audit log", events=events,
+                             action_labels=ACTION_LABELS,
+                             selected_action=selected_action))
 
 
 @router.get("/companies", response_class=HTMLResponse)

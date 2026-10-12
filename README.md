@@ -374,6 +374,20 @@ After changing roles, sign out and sign in again to refresh the application
 session. Close every Incognito window before testing a fresh Incognito session.
 Provider account selection and session termination still need a live browser check.
 
+## Audit Trail
+
+Company admins can review who did what at `/admin/audit` (or
+`GET /api/admin/audit`), limited to their selected company. Recorded actions:
+vendor creation, document uploads and processing, assessment requests, completion,
+failure and export, AI chat questions (length only, never the text), company
+switching, and changes to user access and the company default. Events are written
+on a separate short session after the action succeeds, so a failed audit write is
+logged but never blocks the user. Events are kept indefinitely.
+
+Requires migration `a7c4e2f91b3d`. Run the migration job before deploying this
+release; until then audit writes fail (logged) and the audit page errors, while the
+rest of the application keeps working.
+
 ## Quality Evaluation
 
 `evals/fixtures/` holds documents for two fictional vendors with planted issues:
@@ -592,7 +606,7 @@ access, a sample document-to-assessment flow, and actual API/MCP client tokens.
 ## Possible Next Steps
 
 - Expand representative retrieval and grounding evaluation datasets.
-- Add company access audit records and team assignments when needed.
+- Add team assignments when needed.
 - Tune policy severities and score weights with analysts.
 - Add persistent chat history, audit records, and richer operational monitoring.
 

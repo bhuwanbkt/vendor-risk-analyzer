@@ -24,7 +24,7 @@ import time
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -32,7 +32,8 @@ from vendor_risk_analyzer.assessments.service import (
     AssessmentPersistenceError,
     AssessmentPersistenceService,
 )
-from vendor_risk_analyzer.db.models import Assessment
+from vendor_risk_analyzer.audit.service import record_event
+from vendor_risk_analyzer.db.models import Assessment, Vendor
 from vendor_risk_analyzer.db.url import get_database_url
 from vendor_risk_analyzer.embeddings.service import EmbeddingError, EmbeddingService
 from vendor_risk_analyzer.retrieval.service import SemanticRetriever
@@ -216,6 +217,41 @@ async def fail_stale_assessments(session_factory, *, stale_minutes: int) -> int:
     return int(result.rowcount or 0)
 
 
+async def audit_job(
+    session_factory,
+    assessment_id: UUID,
+    action: str,
+    details: dict | None = None,
+) -> None:
+    """Audit a job outcome as the user who requested the assessment."""
+    try:
+        async with session_factory() as db:
+            row = (
+                await db.execute(
+                    select(Assessment.vendor_id, Assessment.extra_data, Vendor.tenant_id)
+                    .join(Vendor, Vendor.id == Assessment.vendor_id)
+                    .where(Assessment.id == assessment_id)
+                )
+            ).first()
+        if row is None:
+            return
+        vendor_id, metadata, tenant_id = row
+        metadata = metadata or {}
+        await record_event(
+            tenant_id=tenant_id,
+            actor_subject=metadata.get("requested_by"),
+            actor=metadata.get("requested_by_name"),
+            action=action,
+            target_type="assessment",
+            target_id=assessment_id,
+            vendor_id=vendor_id,
+            details=details,
+            factory=session_factory,
+        )
+    except Exception:
+        logger.exception("Could not audit assessment %s", assessment_id)
+
+
 async def run_assessment_job(session_factory, assessment_id: UUID) -> str:
     """Run one claimed assessment to completion. Returns the final status."""
 
@@ -272,6 +308,12 @@ async def run_assessment_job(session_factory, assessment_id: UUID) -> str:
             assessment_id,
             time.perf_counter() - started,
         )
+        await audit_job(
+            session_factory,
+            assessment_id,
+            "assessment.completed",
+            {"duration_seconds": round(time.perf_counter() - started, 1)},
+        )
         return "completed"
 
     except asyncio.CancelledError:
@@ -291,10 +333,17 @@ async def run_assessment_job(session_factory, assessment_id: UUID) -> str:
         logger.exception(
             "Background assessment failed. assessment_id=%s", assessment_id
         )
+        message = user_message(exc)
         try:
-            await mark_failed(session_factory, assessment_id, user_message(exc))
+            await mark_failed(session_factory, assessment_id, message)
         except Exception:
             logger.exception("Could not mark assessment %s failed", assessment_id)
+        await audit_job(
+            session_factory,
+            assessment_id,
+            "assessment.failed",
+            {"error": message},
+        )
         return "failed"
 
     finally:
