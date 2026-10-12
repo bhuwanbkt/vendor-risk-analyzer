@@ -189,6 +189,28 @@
 
         </div>
 
+
+        <div>
+
+            <span>
+                Embedding Worker
+            </span>
+
+            <strong>
+                {{
+                    system_info.worker_state
+                    | replace("_", " ")
+                }}
+            </strong>
+
+            {% if system_info.worker_detail %}
+            <small>
+                {{ system_info.worker_detail }}
+            </small>
+            {% endif %}
+
+        </div>
+
     </div>
 
 </section>

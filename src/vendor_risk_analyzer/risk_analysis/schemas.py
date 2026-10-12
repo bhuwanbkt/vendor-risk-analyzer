@@ -151,3 +151,5 @@ class VendorRiskAnalysisResult(
     coverage: list[CategoryCoverageResult] = Field(
         default_factory=list,
     )
+    # Model findings removed because no valid evidence remained.
+    dropped_finding_count: int = Field(default=0, ge=0)

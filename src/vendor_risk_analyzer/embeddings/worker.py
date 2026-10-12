@@ -444,6 +444,54 @@ async def process_document(
         return "embedding_failed"
 
 
+# Current worker state for the admin System page. One worker
+# runs per application process.
+worker_status: dict[str, str] = {
+    "state": "not_started",
+    "detail": "",
+}
+
+
+def set_worker_status(
+    state: str,
+    detail: str = "",
+) -> None:
+    worker_status["state"] = state
+    worker_status["detail"] = detail[:300]
+
+
+def report_worker_exit(
+    task: asyncio.Task,
+) -> None:
+    """
+    Done-callback for the worker task. Without it, a crash
+    (missing API key, invalid setting) is only visible when the
+    app shuts down, while documents stay embedding_pending.
+    """
+    if task.cancelled():
+        return
+
+    exc = task.exception()
+
+    if exc is None:
+        return
+
+    set_worker_status(
+        "stopped",
+        f"{type(exc).__name__}: {exc}",
+    )
+
+    logger.critical(
+        "Automatic embedding worker stopped unexpectedly: "
+        "%s: %s. Documents will stay in embedding_pending "
+        "until the configuration is fixed and the app "
+        "restarts.",
+        type(exc).__name__,
+        exc,
+        exc_info=exc,
+    )
+
+
 async def run_embedding_worker() -> None:
     """
     Long-running lightweight worker.
@@ -458,6 +506,10 @@ async def run_embedding_worker() -> None:
 
     if enabled in {"false", "0", "no", "off"}:
         logger.info("Automatic embedding worker is disabled.")
+        set_worker_status(
+            "disabled",
+            "EMBEDDING_WORKER_ENABLED is false.",
+        )
         return
 
     if enabled not in {"true", "1", "yes", "on"}:
@@ -499,6 +551,7 @@ async def run_embedding_worker() -> None:
 
     try:
         embedding_service = EmbeddingService()
+        set_worker_status("running")
         next_recovery_at = time.monotonic()
         recovery_interval_seconds = stale_minutes * 60.0
 
@@ -587,6 +640,11 @@ async def run_embedding_worker() -> None:
                 )
 
     except asyncio.CancelledError:
+        set_worker_status(
+            "stopped",
+            "Application shutting down.",
+        )
+
         logger.info(
             "Automatic embedding worker "
             "stopped."

@@ -86,12 +86,18 @@
 
     <div class="report-stat">
 
+        {% set coverage_percent = assessment.extra_data.get("coverage_percent") %}
+
         <span>
-            Status
+            Coverage
         </span>
 
         <strong>
-            {{ assessment.status }}
+            {{
+                (coverage_percent | round | int | string) ~ "%"
+                if coverage_percent is not none
+                else "Not measured"
+            }}
         </strong>
 
     </div>
@@ -118,12 +124,12 @@
     <div class="report-stat">
 
         <span>
-            Score
+            Risk score
         </span>
 
         <strong>
             {{
-                assessment.overall_score
+                (assessment.overall_score | round | int | string) ~ " / 100"
                 if assessment.overall_score is not none
                 else "Not calculated"
             }}
@@ -177,7 +183,7 @@
                             {{
                                 finding.category
                                 | replace("_", " ")
-                                | title
+                                | title | replace("Ai ", "AI ")
                             }}
                         </span>
 
@@ -226,7 +232,7 @@
                                     "other"
                                 )
                                 | replace("_", " ")
-                                | title
+                                | title | replace("Ai ", "AI ")
                             }}
                         </strong>
 
@@ -413,7 +419,7 @@
                 <tr>
 
                     <td>
-                        {{ (item.category or "") | replace("_", " ") | title }}
+                        {{ (item.category or "") | replace("_", " ") | title | replace("Ai ", "AI ") }}
                     </td>
 
                     <td>

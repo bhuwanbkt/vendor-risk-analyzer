@@ -280,6 +280,8 @@ class AssessmentPersistenceService:
                         analysis
                         .normalized_finding_count
                     ),
+                "dropped_finding_count":
+                    analysis.dropped_finding_count,
                 "category_coverage": [
                     item.model_dump()
                     for item in analysis.coverage

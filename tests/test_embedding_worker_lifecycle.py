@@ -238,3 +238,30 @@ def test_processing_renews_document_claim_for_each_batch(monkeypatch, runtime) -
         call.kwargs == {"document_id": "document-123", "status": "embedding"}
         for call in renew_claim.await_args_list
     )
+
+
+def test_crashed_worker_is_reported_immediately(caplog) -> None:
+    async def crash():
+        raise worker.EmbeddingError("GEMINI_API_KEY is required.")
+
+    async def run():
+        task = asyncio.create_task(crash())
+        task.add_done_callback(worker.report_worker_exit)
+        with pytest.raises(worker.EmbeddingError):
+            await task
+        await asyncio.sleep(0)
+
+    with caplog.at_level("CRITICAL", logger="uvicorn.error"):
+        asyncio.run(run())
+
+    assert worker.worker_status["state"] == "stopped"
+    assert "GEMINI_API_KEY is required." in worker.worker_status["detail"]
+    assert "stopped unexpectedly" in caplog.text
+
+
+def test_disabled_worker_reports_disabled_status(monkeypatch, runtime) -> None:
+    monkeypatch.setenv("EMBEDDING_WORKER_ENABLED", "false")
+
+    asyncio.run(worker.run_embedding_worker())
+
+    assert worker.worker_status["state"] == "disabled"

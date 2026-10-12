@@ -24,7 +24,7 @@ logger = logging.getLogger(
 
 
 POLICY_VERSION = (
-    "vendor-risk-policy-v2"
+    "vendor-risk-policy-v3"
 )
 
 
@@ -190,6 +190,77 @@ def _build_policy_rules() -> dict[tuple[str, str], dict[str, str]]:
 
 
 POLICY_RULES = _build_policy_rules()
+
+
+# ------------------------------------------------------------
+# Numeric risk score (policy v3).
+#
+# Each rated finding contributes a weight by severity. Weights
+# combine with diminishing returns, like independent
+# probabilities, so the score rises with every finding but can
+# never exceed 100:
+#
+#     score = 100 x (1 - product(1 - weight))
+#
+# One high finding scores 30; two high findings 51; no findings
+# 0. Unrated findings contribute nothing. The score describes
+# documented findings only; read it with coverage_percent.
+# ------------------------------------------------------------
+
+SCORE_METHOD = "weighted-findings-v1"
+
+SEVERITY_WEIGHTS = {
+    "unrated": 0.0,
+    "low": 0.05,
+    "medium": 0.15,
+    "high": 0.30,
+    "critical": 0.50,
+}
+
+
+def compute_risk_score(
+    severities,
+) -> float:
+    remaining = 1.0
+
+    for severity in severities:
+        remaining *= 1.0 - SEVERITY_WEIGHTS.get(
+            severity,
+            0.0,
+        )
+
+    return round(
+        100.0 * (1.0 - remaining),
+        1,
+    )
+
+
+def compute_coverage_percent(
+    coverage,
+) -> float | None:
+    """Percent of searched categories marked assessed."""
+    if not isinstance(coverage, list) or not coverage:
+        return None
+
+    statuses = [
+        item.get("status")
+        for item in coverage
+        if isinstance(item, dict)
+    ]
+
+    if not statuses:
+        return None
+
+    assessed = sum(
+        1
+        for status in statuses
+        if status == "assessed"
+    )
+
+    return round(
+        100.0 * assessed / len(statuses),
+        1,
+    )
 
 
 class RiskPolicyError(
@@ -379,6 +450,15 @@ class RiskPolicyService:
             proposed_overall_risk=(
                 proposed_overall_risk
             ),
+            proposed_overall_score=compute_risk_score(
+                decision.proposed_severity
+                for decision in decisions
+            ),
+            coverage_percent=compute_coverage_percent(
+                (assessment.extra_data or {}).get(
+                    "category_coverage"
+                )
+            ),
             decisions=(
                 decisions
             ),
@@ -401,8 +481,7 @@ class RiskPolicyService:
         - assessments.overall_risk
         - assessments.metadata
 
-        Does NOT calculate or modify
-        overall_score.
+        - assessments.overall_score (policy v3)
         """
 
         evaluation = (
@@ -499,6 +578,11 @@ class RiskPolicyService:
                 .proposed_overall_risk
             )
 
+            assessment.overall_score = (
+                evaluation
+                .proposed_overall_score
+            )
+
             rated_finding_count = sum(
                 1
                 for decision
@@ -526,6 +610,13 @@ class RiskPolicyService:
                 "total_finding_count":
                     len(
                         evaluation.decisions
+                    ),
+                "score_method":
+                    SCORE_METHOD,
+                "coverage_percent":
+                    (
+                        evaluation
+                        .coverage_percent
                     ),
             }
 

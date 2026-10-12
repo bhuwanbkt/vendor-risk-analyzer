@@ -65,9 +65,14 @@ Findings distinguish three types:
 | `explicit_risk` | The evidence describes a risk or open issue. |
 
 The LLM identifies risk signals; policy rules assign final severity. Policy
-`vendor-risk-policy-v2` rates every finding type and category combination as low,
+`vendor-risk-policy-v3` rates every finding type and category combination as low,
 medium, or high; rules never assign `critical`, which requires analyst judgement.
-Numeric `overall_score` is currently left unset.
+The policy also sets a 0-100 `overall_score` (higher is riskier): each finding
+contributes a severity weight (low 0.05, medium 0.15, high 0.30, critical 0.50)
+and weights combine as `100 x (1 - product(1 - weight))`, so every finding raises
+the score with diminishing returns and it never exceeds 100. The score reflects
+documented findings only; the report shows it next to coverage, the share of the
+nine categories whose evidence was assessed.
 
 Each assessment searches nine risk categories (access control, encryption,
 incident response, vulnerability management, privacy, business continuity, data
@@ -103,7 +108,9 @@ metadata and use table-specific grouping.
 
 A query is embedded with Gemini and searched using pgvector cosine distance.
 Search is restricted to the selected vendor, documents with status `ready`, and
-chunks matching the active embedding model and dimension. Chat retrieves up to
+chunks matching the active embedding model and dimension. On pgvector 0.8 or later,
+searches enable relaxed iterative HNSW scans so a vendor with few chunks still
+receives its full result count as the shared table grows. Chat retrieves up to
 five chunks; assessment analysis collects evidence for each of nine risk categories.
 
 | Setting | Use |
@@ -523,7 +530,7 @@ access, a sample document-to-assessment flow, and actual API/MCP client tokens.
 
 - ZITADEL and Gemini are external dependencies; the complete local application is not offline.
 - Company access must be explicitly registered by an operator; team/group assignments are not implemented.
-- Policy severities are document-based defaults, and a numeric overall-risk score is not implemented.
+- Policy severities and score weights are document-based defaults, not calibrated against outcomes.
 - Chat history is not persisted on the server.
 - Automated citation checks validate references, not every factual claim in generated text.
 - Automated CI does not replace hosted-login, live-model, or retrieval-quality evaluation.
@@ -532,7 +539,7 @@ access, a sample document-to-assessment flow, and actual API/MCP client tokens.
 
 - Expand representative retrieval and grounding evaluation datasets.
 - Add company access audit records and team assignments when needed.
-- Tune policy severities with analysts and define a documented scoring method.
+- Tune policy severities and score weights with analysts.
 - Add persistent chat history, audit records, and richer operational monitoring.
 
 ## Further Documentation

@@ -73,6 +73,7 @@ from vendor_risk_analyzer.config import (
 # ============================================================
 
 from vendor_risk_analyzer.embeddings.worker import (
+    report_worker_exit,
     run_embedding_worker,
 )
 
@@ -120,12 +121,15 @@ async def lifespan(app: FastAPI):
         embedding_worker_task = asyncio.create_task(
             run_embedding_worker(), name="automatic-embedding-worker"
         )
+        # Log a crashed worker immediately instead of at shutdown.
+        embedding_worker_task.add_done_callback(report_worker_exit)
         try:
             yield
         finally:
             if not embedding_worker_task.done():
                 embedding_worker_task.cancel()
-            with suppress(asyncio.CancelledError):
+            # A crash was already logged by report_worker_exit.
+            with suppress(asyncio.CancelledError, Exception):
                 await embedding_worker_task
 
 
