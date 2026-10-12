@@ -8,6 +8,7 @@ expired attribute raises (MissingGreenlet in production) until refresh().
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib
 import threading
 from datetime import datetime, timedelta, timezone
@@ -50,9 +51,17 @@ def ingestion(monkeypatch):
 
     get_settings.cache_clear()
     module = importlib.import_module("vendor_risk_analyzer.ingestion.service")
-    monkeypatch.setattr(module, "download_object", lambda key: b"raw bytes")
+    monkeypatch.setattr(module, "download_object", lambda key: RAW_CONTENT)
+    monkeypatch.setattr(
+        module,
+        "get_object_metadata",
+        lambda key: {"ContentLength": len(RAW_CONTENT)},
+    )
     yield module
     get_settings.cache_clear()
+
+
+RAW_CONTENT = b"raw bytes"
 
 
 class ExpiredAttributeError(RuntimeError):
@@ -70,6 +79,8 @@ class FakeDocument:
         self.object_key = "vendors/v/raw/d/policy.pdf"
         self.status = "uploaded"
         self.extra_data = {"etag": "abc"}
+        self.size_bytes = len(RAW_CONTENT)
+        self.sha256 = hashlib.sha256(RAW_CONTENT).hexdigest()
 
     def __getattribute__(self, name):
         if name in FakeDocument._loaded and object.__getattribute__(self, "_expired"):
@@ -196,3 +207,48 @@ def test_document_response_exposes_stale_flag_without_timestamp():
 
     assert data["stale_processing"] is True
     assert "updated_at" not in data
+
+
+def never_parse(content):
+    raise AssertionError("parser must not run for an unverified file")
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        None,
+        {"ContentLength": len(RAW_CONTENT) + 1},
+        {"ContentLength": 26 * 1024 * 1024},
+    ],
+)
+def test_size_mismatch_fails_before_download(ingestion, monkeypatch, metadata):
+    monkeypatch.setattr(ingestion, "get_object_metadata", lambda key: metadata)
+
+    def no_download(key):
+        raise AssertionError("an unverified object must not be downloaded")
+
+    monkeypatch.setattr(ingestion, "download_object", no_download)
+    monkeypatch.setattr(ingestion, "get_parser", lambda ext: parser(never_parse))
+    document = FakeDocument()
+    db = ExpiringSession(document)
+
+    with pytest.raises(ValueError):
+        asyncio.run(ingestion.ingest_document(document=document, db=db))
+
+    assert document.status == "failed"
+
+
+def test_replaced_content_is_rejected_by_hash(ingestion, monkeypatch):
+    # Same size, different bytes: e.g. the object was overwritten after
+    # the upload was confirmed.
+    tampered = b"RAW BYTES"
+    monkeypatch.setattr(ingestion, "download_object", lambda key: tampered)
+    monkeypatch.setattr(ingestion, "get_parser", lambda ext: parser(never_parse))
+    document = FakeDocument()
+    db = ExpiringSession(document)
+
+    with pytest.raises(ValueError, match="SHA-256"):
+        asyncio.run(ingestion.ingest_document(document=document, db=db))
+
+    assert document.status == "failed"
+    assert "SHA-256" in document.extra_data["ingestion_error"]
