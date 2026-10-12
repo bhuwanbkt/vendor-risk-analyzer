@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import unicodedata
 
 import pytest
 
@@ -46,6 +47,8 @@ def test_viewer_downloads_pdf_report(security_api):
     assert response.content.startswith(b"%PDF")
     with pymupdf.open(stream=response.content, filetype="pdf") as document:
         text = "".join(page.get_text() for page in document)
+    # PDF text extraction keeps typographic ligatures ("ﬁ"); NFKC expands them.
+    text = unicodedata.normalize("NFKC", text)
     assert "Private finding A" in text
 
 
