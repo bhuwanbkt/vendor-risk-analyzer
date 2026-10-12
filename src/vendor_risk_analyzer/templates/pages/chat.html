@@ -62,6 +62,33 @@
         </label>
 
 
+        <div class="chat-history">
+
+            <div class="chat-history-heading">
+                <strong>
+                    Saved conversations
+                </strong>
+                <button
+                    type="button"
+                    id="chat-new"
+                    class="secondary-button"
+                >
+                    New chat
+                </button>
+            </div>
+
+            <ul
+                id="chat-conversations"
+                class="chat-conversation-list"
+            >
+                <li class="chat-history-empty">
+                    Select a vendor to see your saved conversations.
+                </li>
+            </ul>
+
+        </div>
+
+
         <div class="chat-security-note">
 
             <strong>
@@ -183,5 +210,5 @@
 
 
 {% block scripts %}
-<script src="/static/js/chat.js?v=2"></script>
+<script src="/static/js/chat.js?v=3"></script>
 {% endblock %}

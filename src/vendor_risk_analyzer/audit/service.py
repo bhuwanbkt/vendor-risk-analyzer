@@ -109,6 +109,7 @@ ACTION_LABELS = {
     "assessment.failed": "Assessment failed",
     "assessment.exported": "Exported assessment",
     "chat.question_asked": "Asked AI chat",
+    "chat.conversation_deleted": "Deleted chat conversation",
     "access.member_added": "Added company user",
     "access.member_updated": "Changed user access",
     "access.default_changed": "Changed default access",

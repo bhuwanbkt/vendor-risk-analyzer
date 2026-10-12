@@ -98,8 +98,7 @@ control. A report with no findings does not prove that every possible risk was a
 
 Parsed elements preserve document structure; chunks provide the smaller units
 used for retrieval. Reprocessing replaces a document's previous elements and
-chunks, and the worker then generates embeddings for the new chunks. Chat
-conversation history is not persisted by the server.
+chunks, and the worker then generates embeddings for the new chunks. Web chat conversations are saved per user (see Saved Chat); MCP chat is not saved.
 
 ## Chunking and Retrieval
 
@@ -374,6 +373,16 @@ After changing roles, sign out and sign in again to refresh the application
 session. Close every Incognito window before testing a fresh Incognito session.
 Provider account selection and session termination still need a live browser check.
 
+## Saved Chat
+
+Web chat conversations are saved per user and vendor (migration `b3e8d5c2a9f1`)
+and listed beside the chat. Conversations are private to the person who created
+them and disappear from view if that person loses access to the vendor. When a
+conversation continues, its last six messages are loaded from the database; any
+history sent by the browser is ignored for saved conversations. The MCP
+`ask_vendor` tool remains stateless. If saving fails, the answer is still
+returned. Run the migration job before deploying this release.
+
 ## Audit Trail
 
 Company admins can review who did what at `/admin/audit` (or
@@ -455,7 +464,9 @@ The main application endpoints are:
 | POST | `/api/vendors/{vendor_id}/assessments` | Queue an assessment (202); poll `GET /api/assessments/{id}` until `completed` or `failed` |
 | GET | `/api/assessments/{assessment_id}` | Read a saved report |
 | GET | `/api/assessments/{assessment_id}/export?format=pdf\|docx` | Download a completed report as PDF or Word |
-| POST | `/api/chat` | Ask a question with an explicit vendor ID |
+| POST | `/api/chat` | Ask a question with an explicit vendor ID; pass `conversation_id` to continue a saved chat |
+| GET | `/api/chat/conversations?vendor_id=` | List your saved conversations |
+| GET / DELETE | `/api/chat/conversations/{conversation_id}` | Open or delete one of your conversations |
 
 Public Swagger/ReDoc/OpenAPI endpoints are disabled. Browser sessions authenticate
 the application APIs. External clients can opt into JWT bearer access tokens by
@@ -599,7 +610,6 @@ access, a sample document-to-assessment flow, and actual API/MCP client tokens.
 - ZITADEL and Gemini are external dependencies; the complete local application is not offline.
 - Company access must be explicitly registered by an operator; team/group assignments are not implemented.
 - Policy severities and score weights are document-based defaults, not calibrated against outcomes.
-- Chat history is not persisted on the server.
 - Automated citation checks validate references, not every factual claim in generated text.
 - Automated CI does not replace hosted-login, live-model, or retrieval-quality evaluation.
 
@@ -608,7 +618,7 @@ access, a sample document-to-assessment flow, and actual API/MCP client tokens.
 - Expand representative retrieval and grounding evaluation datasets.
 - Add team assignments when needed.
 - Tune policy severities and score weights with analysts.
-- Add persistent chat history, audit records, and richer operational monitoring.
+- Add richer operational monitoring.
 
 ## Further Documentation
 

@@ -2328,3 +2328,98 @@ textarea {
 
     font-size: 11px;
 }
+
+
+/* ============================================================
+   SAVED CHAT CONVERSATIONS
+   ============================================================ */
+
+.chat-history {
+    margin-top: 18px;
+}
+
+
+.chat-history-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+
+    margin-bottom: 8px;
+}
+
+
+.chat-conversation-list {
+    max-height: 320px;
+    overflow-y: auto;
+
+    margin: 0;
+    padding: 0;
+
+    list-style: none;
+}
+
+
+.chat-conversation-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+
+    border-radius: 10px;
+}
+
+
+.chat-conversation-list li.active {
+    background: var(--surface-soft);
+}
+
+
+.chat-conversation-open {
+    flex: 1;
+
+    padding: 8px;
+
+    border: 0;
+
+    background: transparent;
+
+    color: var(--text);
+
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+
+    cursor: pointer;
+}
+
+
+.chat-conversation-open small {
+    display: block;
+
+    color: var(--text-muted);
+
+    font-size: 11px;
+}
+
+
+.chat-conversation-delete {
+    padding: 8px;
+
+    border: 0;
+
+    background: transparent;
+
+    color: var(--text-muted);
+
+    cursor: pointer;
+}
+
+
+.chat-history-empty {
+    padding: 8px 0;
+
+    color: var(--text-muted);
+
+    font-size: 13px;
+}
+

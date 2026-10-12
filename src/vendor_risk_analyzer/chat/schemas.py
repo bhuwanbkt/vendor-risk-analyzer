@@ -39,6 +39,9 @@ class ChatRequest(
         default_factory=list,
         max_length=6,
     )
+    # Continue a saved conversation. Its history then comes from the
+    # server, and any client-supplied history is ignored.
+    conversation_id: UUID | None = None
 
 
 class ChatSource(
@@ -67,3 +70,23 @@ class ChatResponse(
     sources: list[
         ChatSource
     ]
+    conversation_id: UUID | None = None
+
+
+class ConversationSummary(BaseModel):
+    id: UUID
+    vendor_id: UUID
+    title: str
+    updated_at: str
+
+
+class ConversationMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+    sources: list[ChatSource]
+    created_at: str
+
+
+class ConversationDetail(ConversationSummary):
+    messages: list[ConversationMessage]
+
