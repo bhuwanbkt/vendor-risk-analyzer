@@ -1,0 +1,12 @@
+Domain,Question,Vendor Response,Response Date
+Access Control,Is multi-factor authentication enforced for all users with access to customer data?,Yes. MFA is enforced for all employees and contractors.,2026-04-15
+Access Control,How often are user access reviews performed for production systems?,User access reviews are performed annually.,2026-04-15
+Encryption,Is customer data encrypted at rest and in transit?,Yes. AES-256 at rest and TLS 1.2+ in transit.,2026-04-15
+Incident Response,What is your customer notification timeline for confirmed security breaches?,Affected customers are notified within 24 hours of confirming a breach.,2026-04-15
+Incident Response,Do you have a documented incident response plan?,Yes. The plan is reviewed annually.,2026-04-15
+Vulnerability Management,When was your last independent penetration test?,November 2025.,2026-04-15
+Vulnerability Management,Are there any open high or critical findings from the last penetration test?,No open high or critical findings.,2026-04-15
+Business Continuity,When was your last disaster recovery test?,Disaster recovery is tested annually.,2026-04-15
+Data Retention,How long is customer data retained after contract termination?,Deleted within 30 days from production and 90 days from backups.,2026-04-15
+Third-Party Risk,Do you maintain current security assurance reports for all subprocessors?,Yes. SOC 2 reports are collected annually.,2026-04-15
+Privacy,Do you offer a Data Processing Agreement?,Yes. A GDPR-aligned DPA is available.,2026-04-15

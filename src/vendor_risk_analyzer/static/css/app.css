@@ -2240,3 +2240,186 @@ textarea {
     color: #b42318;
 }
 
+
+/* ============================================================
+   BACKGROUND ASSESSMENT PROGRESS
+   ============================================================ */
+
+.progress-steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+
+    margin: 16px 0 8px;
+    padding: 0;
+
+    list-style: none;
+}
+
+
+.progress-steps li {
+    padding: 6px 12px;
+
+    border: 1px solid var(--border);
+    border-radius: 999px;
+
+    color: var(--text-muted);
+
+    font-size: 12px;
+    font-weight: 600;
+}
+
+
+.progress-steps li.done {
+    border-color: transparent;
+
+    background: #ecfdf3;
+
+    color: #027a48;
+}
+
+
+.progress-steps li.current {
+    border-color: var(--primary);
+
+    color: var(--primary);
+}
+
+
+.assessment-failed h2 {
+    color: var(--red);
+}
+
+
+.report-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+
+    margin-bottom: 12px;
+}
+
+
+.report-actions a {
+    text-decoration: none;
+}
+
+
+
+/* ============================================================
+   AUDIT LOG
+   ============================================================ */
+
+.audit-filter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+
+    margin-bottom: 16px;
+}
+
+
+.audit-table small {
+    display: block;
+
+    color: var(--text-muted);
+
+    font-size: 11px;
+}
+
+
+/* ============================================================
+   SAVED CHAT CONVERSATIONS
+   ============================================================ */
+
+.chat-history {
+    margin-top: 18px;
+}
+
+
+.chat-history-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+
+    margin-bottom: 8px;
+}
+
+
+.chat-conversation-list {
+    max-height: 320px;
+    overflow-y: auto;
+
+    margin: 0;
+    padding: 0;
+
+    list-style: none;
+}
+
+
+.chat-conversation-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+
+    border-radius: 10px;
+}
+
+
+.chat-conversation-list li.active {
+    background: var(--surface-soft);
+}
+
+
+.chat-conversation-open {
+    flex: 1;
+
+    padding: 8px;
+
+    border: 0;
+
+    background: transparent;
+
+    color: var(--text);
+
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+
+    cursor: pointer;
+}
+
+
+.chat-conversation-open small {
+    display: block;
+
+    color: var(--text-muted);
+
+    font-size: 11px;
+}
+
+
+.chat-conversation-delete {
+    padding: 8px;
+
+    border: 0;
+
+    background: transparent;
+
+    color: var(--text-muted);
+
+    cursor: pointer;
+}
+
+
+.chat-history-empty {
+    padding: 8px 0;
+
+    color: var(--text-muted);
+
+    font-size: 13px;
+}
+

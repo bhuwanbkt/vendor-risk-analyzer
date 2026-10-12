@@ -47,6 +47,7 @@ from vendor_risk_analyzer.api.chat import (
     router as chat_router,
 )
 from vendor_risk_analyzer.api.access import router as access_router
+from vendor_risk_analyzer.api.audit import router as audit_router
 
 
 # ============================================================
@@ -74,6 +75,10 @@ from vendor_risk_analyzer.config import (
 # AUTOMATIC EMBEDDING WORKER
 # ============================================================
 
+from vendor_risk_analyzer.assessments.worker import (
+    report_assessment_worker_exit,
+    run_assessment_worker,
+)
 from vendor_risk_analyzer.embeddings.worker import (
     report_worker_exit,
     run_embedding_worker,
@@ -114,7 +119,7 @@ if settings.mcp_enabled:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Run MCP transport and the automatic embedding worker in this process."""
+    """Run MCP transport and the background workers in this process."""
     async with AsyncExitStack() as stack:
         if mcp_application is not None:
             await stack.enter_async_context(
@@ -125,14 +130,20 @@ async def lifespan(app: FastAPI):
         )
         # Log a crashed worker immediately instead of at shutdown.
         embedding_worker_task.add_done_callback(report_worker_exit)
+        assessment_worker_task = asyncio.create_task(
+            run_assessment_worker(), name="background-assessment-worker"
+        )
+        assessment_worker_task.add_done_callback(report_assessment_worker_exit)
         try:
             yield
         finally:
-            if not embedding_worker_task.done():
-                embedding_worker_task.cancel()
-            # A crash was already logged by report_worker_exit.
-            with suppress(asyncio.CancelledError, Exception):
-                await embedding_worker_task
+            for task in (assessment_worker_task, embedding_worker_task):
+                if not task.done():
+                    task.cancel()
+            # Crashes were already logged by the done callbacks.
+            for task in (assessment_worker_task, embedding_worker_task):
+                with suppress(asyncio.CancelledError, Exception):
+                    await task
 
 
 # ============================================================
@@ -250,6 +261,7 @@ app.include_router(
     chat_router
 )
 app.include_router(access_router)
+app.include_router(audit_router)
 
 
 # ============================================================

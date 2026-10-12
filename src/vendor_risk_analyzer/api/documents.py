@@ -13,6 +13,7 @@ from fastapi import (
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from vendor_risk_analyzer.audit.service import record as audit
 from vendor_risk_analyzer.auth.access import require_vendor_access
 
 from vendor_risk_analyzer.auth.dependencies import (
@@ -81,7 +82,7 @@ async def create_upload_url(
     ),
     _: None = Depends(verify_csrf),
 ):
-    await require_vendor_access(db, user, vendor_id)
+    access = await require_vendor_access(db, user, vendor_id)
 
     existing = (
         await db.execute(
@@ -114,6 +115,20 @@ async def create_upload_url(
         existing.mime_type = payload.content_type
 
         await db.commit()
+
+        await audit(
+            access,
+            user,
+            "document.upload_requested",
+            target_type="document",
+            target_id=existing.id,
+            vendor_id=vendor_id,
+            details={
+                "filename": existing.filename,
+                "size_bytes": existing.size_bytes,
+                "resumed": True,
+            },
+        )
 
         return DocumentUploadResponse(
             document_id=existing.id,
@@ -171,6 +186,19 @@ async def create_upload_url(
             detail="Document already exists",
         ) from exc
 
+    await audit(
+        access,
+        user,
+        "document.upload_requested",
+        target_type="document",
+        target_id=document_id,
+        vendor_id=vendor_id,
+        details={
+            "filename": filename,
+            "size_bytes": payload.size_bytes,
+        },
+    )
+
     return DocumentUploadResponse(
         document_id=document_id,
         upload_url=upload_url,
@@ -195,7 +223,7 @@ async def complete_upload(
     ),
     _: None = Depends(verify_csrf),
 ):
-    await require_vendor_access(db, user, vendor_id)
+    access = await require_vendor_access(db, user, vendor_id)
     result = await db.execute(
         select(Document).where(
             Document.id == document_id,
@@ -245,6 +273,16 @@ async def complete_upload(
     await db.commit()
     await db.refresh(document)
 
+    await audit(
+        access,
+        user,
+        "document.uploaded",
+        target_type="document",
+        target_id=document.id,
+        vendor_id=vendor_id,
+        details={"filename": document.filename},
+    )
+
     return document
 
 
@@ -263,7 +301,7 @@ async def list_documents(
         )
     ),
 ):
-    await require_vendor_access(db, user, vendor_id)
+    access = await require_vendor_access(db, user, vendor_id)
     result = await db.execute(
         select(Document)
         .where(
@@ -293,7 +331,7 @@ async def ingest_uploaded_document(
     ),
     _: None = Depends(verify_csrf),
 ):
-    await require_vendor_access(db, user, vendor_id)
+    access = await require_vendor_access(db, user, vendor_id)
     result = await db.execute(
         select(Document).where(
             Document.id == document_id,
@@ -350,6 +388,16 @@ async def ingest_uploaded_document(
                 "for ingestion"
             ),
         )
+
+    await audit(
+        access,
+        user,
+        "document.processing_started",
+        target_type="document",
+        target_id=document_id,
+        vendor_id=vendor_id,
+        details={"filename": document.filename},
+    )
 
     try:
         return await ingest_document(

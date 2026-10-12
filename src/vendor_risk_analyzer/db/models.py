@@ -522,3 +522,70 @@ class Finding(
             "severity",
         ),
     )
+
+
+class AuditEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Who did what, per company. Rows are append-only.
+
+    vendor_id is not a foreign key so events outlive deleted vendors.
+    """
+
+    __tablename__ = "audit_events"
+
+    tenant_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True
+    )
+    actor_subject: Mapped[str | None] = mapped_column(String(255))
+    actor_name: Mapped[str | None] = mapped_column(String(320))
+    action: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    target_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_id: Mapped[str | None] = mapped_column(String(64))
+    vendor_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    details: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+
+    __table_args__ = (
+        Index("ix_audit_events_tenant_created", "tenant_id", "created_at"),
+    )
+
+
+class ChatConversation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A user's saved AI chat about one vendor. Private to its owner."""
+
+    __tablename__ = "chat_conversations"
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    vendor_id: Mapped[UUID] = mapped_column(
+        ForeignKey("vendors.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    member_subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "ix_chat_conversations_owner",
+            "tenant_id",
+            "member_subject",
+            "vendor_id",
+            "updated_at",
+        ),
+    )
+
+
+class ChatMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "chat_messages"
+
+    conversation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("chat_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    sources: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    model: Mapped[str | None] = mapped_column(String(100))
+
+    __table_args__ = (
+        CheckConstraint("role IN ('user', 'assistant')", name="ck_chat_message_role"),
+    )

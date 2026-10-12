@@ -152,10 +152,29 @@ def build_command(
             command.append("--write")
         return command
 
+    if task == "run_eval":
+        cases = [
+            item.strip()
+            for item in env.get("OPS_EVAL_CASES", "").split(",")
+            if item.strip()
+        ]
+        if not cases:
+            raise ValueError(
+                "OPS_EVAL_CASES is required for run_eval, e.g. "
+                "larkspur=<vendor-uuid>,brightwater=<vendor-uuid>"
+            )
+        command = [sys.executable, str(OPS_DIR / "run_eval.py")]
+        for case in cases:
+            command.extend(["--case", case])
+        runs = env.get("OPS_EVAL_RUNS", "").strip()
+        if runs:
+            command.extend(["--runs", runs])
+        return command
+
     raise ValueError(
         "OPS_TASK must be one of: "
         "backfill_embeddings, "
-        "apply_risk_policy, register_tenant."
+        "apply_risk_policy, register_tenant, run_eval."
     )
 
 

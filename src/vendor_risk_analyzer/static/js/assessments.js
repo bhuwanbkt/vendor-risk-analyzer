@@ -141,10 +141,10 @@ runButton
                 true;
 
             runButton.textContent =
-                "Running assessment...";
+                "Starting assessment...";
 
             message.textContent =
-                "Retrieving evidence and analyzing vendor risk...";
+                "Queuing assessment. You'll see live progress next.";
 
 
             try {

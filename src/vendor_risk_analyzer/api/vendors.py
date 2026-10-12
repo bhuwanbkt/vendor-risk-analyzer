@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import uuid4
+from vendor_risk_analyzer.audit.service import record as audit
 from vendor_risk_analyzer.auth.access import resolve_access
 
 from vendor_risk_analyzer.auth.dependencies import (
@@ -95,5 +96,15 @@ async def create_vendor(
         ) from exc
 
     await db.refresh(vendor)
+
+    await audit(
+        access,
+        user,
+        "vendor.created",
+        target_type="vendor",
+        target_id=vendor.id,
+        vendor_id=vendor.id,
+        details={"name": vendor.name},
+    )
 
     return vendor

@@ -41,7 +41,8 @@ flowchart TD
     S --> G[Gemini]
 ```
 
-The embedding worker and optional MCP transport run inside the FastAPI process.
+The embedding worker, the background assessment worker, and the optional MCP
+transport run inside the FastAPI process.
 Compose provides the application, database, and object storage locally. ZITADEL
 and Gemini remain external services.
 
@@ -51,7 +52,9 @@ and Gemini remain external services.
 2. The browser uploads the original file to private object storage using a signed URL.
 3. Document processing selects a parser, saves structural elements, and creates retrieval chunks.
 4. The document enters `embedding_pending`. The worker embeds missing chunks, verifies the stored vectors, and marks the document `ready` when processing is complete.
-5. Assessment retrieval searches ready documents for the selected vendor across risk-analysis topics and combines repeated evidence hits.
+5. Running an assessment queues it (HTTP 202). The background assessment worker claims queued
+   assessments one at a time and records progress, which the report page shows live.
+   Retrieval searches ready documents for the selected vendor across risk-analysis topics and combines repeated evidence hits.
 6. Gemini returns a structured summary and findings. Grounding checks verify cited chunk IDs against the retrieved evidence.
 7. Deterministic logic consolidates duplicate findings and rebuilds the summary when the finding set changes, without another LLM call.
 8. The application persists the assessment and findings, applies deterministic risk policy, and displays the saved report.
@@ -95,8 +98,7 @@ control. A report with no findings does not prove that every possible risk was a
 
 Parsed elements preserve document structure; chunks provide the smaller units
 used for retrieval. Reprocessing replaces a document's previous elements and
-chunks, and the worker then generates embeddings for the new chunks. Chat
-conversation history is not persisted by the server.
+chunks, and the worker then generates embeddings for the new chunks. Web chat conversations are saved per user (see Saved Chat); MCP chat is not saved.
 
 ## Chunking and Retrieval
 
@@ -371,6 +373,66 @@ After changing roles, sign out and sign in again to refresh the application
 session. Close every Incognito window before testing a fresh Incognito session.
 Provider account selection and session termination still need a live browser check.
 
+## Saved Chat
+
+Web chat conversations are saved per user and vendor (migration `b3e8d5c2a9f1`)
+and listed beside the chat. Conversations are private to the person who created
+them and disappear from view if that person loses access to the vendor. When a
+conversation continues, its last six messages are loaded from the database; any
+history sent by the browser is ignored for saved conversations. The MCP
+`ask_vendor` tool remains stateless. If saving fails, the answer is still
+returned. Run the migration job before deploying this release.
+
+## Audit Trail
+
+Company admins can review who did what at `/admin/audit` (or
+`GET /api/admin/audit`), limited to their selected company. Recorded actions:
+vendor creation, document uploads and processing, assessment requests, completion,
+failure and export, AI chat questions (length only, never the text), company
+switching, and changes to user access and the company default. Events are written
+on a separate short session after the action succeeds, so a failed audit write is
+logged but never blocks the user. Events are kept indefinitely.
+
+Requires migration `a7c4e2f91b3d`. Run the migration job before deploying this
+release; until then audit writes fail (logged) and the audit page errors, while the
+rest of the application keeps working.
+
+## Quality Evaluation
+
+`evals/fixtures/` holds documents for two fictional vendors with planted issues:
+Larkspur (contradictions, open pentest findings, missing evidence) and Brightwater
+(an outdated incident plan and AI training on customer files by default).
+`src/vendor_risk_analyzer/evaluation/cases.json` lists the issues each assessment
+should find, categories that should stay clean, expected coverage, and the
+expected overall risk.
+
+To run it: create one vendor per case, upload its fixture documents, wait until
+they are `ready`, then run the utility job with:
+
+```dotenv
+OPS_TASK=run_eval
+OPS_EVAL_CASES=larkspur=<vendor-uuid>,brightwater=<vendor-uuid>
+OPS_EVAL_RUNS=3
+```
+
+The evaluation runs the real retrieval, model, and policy rules without saving an
+assessment, prints which planted issues were found or missed in each run, and
+summarizes detection rates across runs (the model is not deterministic). It exits
+non-zero unless every run passes. Run it before and after changing prompts,
+retrieval, or models, and compare the detection rates. Each run makes live Gemini
+calls.
+
+## Background Assessments
+
+Assessments move through `queued` → `running` → `completed` or `failed`. The
+worker uses its own database connections, claims work with `FOR UPDATE SKIP
+LOCKED` (safe with several replicas), and stores progress in the assessment's
+metadata. An assessment interrupted by shutdown returns to `queued` and resumes
+after restart; one left `running` without progress for `ASSESSMENT_STALE_MINUTES`
+(default 15) is marked failed instead of retried, so a failing run cannot loop on
+Gemini usage. Settings: `ASSESSMENT_WORKER_ENABLED` (default true),
+`ASSESSMENT_WORKER_POLL_SECONDS` (default 5), `ASSESSMENT_STALE_MINUTES`.
+
 ## Security Headers and Rate Limits
 
 Every response carries a strict Content-Security-Policy (same-origin scripts and
@@ -399,9 +461,12 @@ The main application endpoints are:
 | POST | `/api/vendors/{vendor_id}/documents/upload-url` | Request a signed upload URL |
 | POST | `/api/vendors/{vendor_id}/documents/{document_id}/complete` | Confirm an uploaded object |
 | POST | `/api/vendors/{vendor_id}/documents/{document_id}/ingest` | Parse the uploaded document and create chunks |
-| POST | `/api/vendors/{vendor_id}/assessments` | Create a grounded assessment and apply policy |
+| POST | `/api/vendors/{vendor_id}/assessments` | Queue an assessment (202); poll `GET /api/assessments/{id}` until `completed` or `failed` |
 | GET | `/api/assessments/{assessment_id}` | Read a saved report |
-| POST | `/api/chat` | Ask a question with an explicit vendor ID |
+| GET | `/api/assessments/{assessment_id}/export?format=pdf\|docx` | Download a completed report as PDF or Word |
+| POST | `/api/chat` | Ask a question with an explicit vendor ID; pass `conversation_id` to continue a saved chat |
+| GET | `/api/chat/conversations?vendor_id=` | List your saved conversations |
+| GET / DELETE | `/api/chat/conversations/{conversation_id}` | Open or delete one of your conversations |
 
 Public Swagger/ReDoc/OpenAPI endpoints are disabled. Browser sessions authenticate
 the application APIs. External clients can opt into JWT bearer access tokens by
@@ -545,16 +610,15 @@ access, a sample document-to-assessment flow, and actual API/MCP client tokens.
 - ZITADEL and Gemini are external dependencies; the complete local application is not offline.
 - Company access must be explicitly registered by an operator; team/group assignments are not implemented.
 - Policy severities and score weights are document-based defaults, not calibrated against outcomes.
-- Chat history is not persisted on the server.
 - Automated citation checks validate references, not every factual claim in generated text.
 - Automated CI does not replace hosted-login, live-model, or retrieval-quality evaluation.
 
 ## Possible Next Steps
 
 - Expand representative retrieval and grounding evaluation datasets.
-- Add company access audit records and team assignments when needed.
+- Add team assignments when needed.
 - Tune policy severities and score weights with analysts.
-- Add persistent chat history, audit records, and richer operational monitoring.
+- Add richer operational monitoring.
 
 ## Further Documentation
 
