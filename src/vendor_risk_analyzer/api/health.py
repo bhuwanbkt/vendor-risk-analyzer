@@ -2,6 +2,7 @@ from fastapi import APIRouter, Response
 from starlette import status
 
 from vendor_risk_analyzer.db.session import check_database
+from vendor_risk_analyzer.version import APP_VERSION
 
 
 router = APIRouter(tags=["Health"])
@@ -12,7 +13,7 @@ async def health_check() -> dict[str, str]:
     return {
         "status": "healthy",
         "service": "vendor-risk-analyzer",
-        "version": "0.1.0",
+        "version": APP_VERSION,
     }
 
 

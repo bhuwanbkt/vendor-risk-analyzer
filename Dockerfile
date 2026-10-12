@@ -1,6 +1,7 @@
 FROM python:3.12-slim
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# Pinned for reproducible builds; matches the uv_build range in pyproject.toml.
+COPY --from=ghcr.io/astral-sh/uv:0.12.5 /uv /uvx /bin/
 
 WORKDIR /app
 
@@ -22,6 +23,13 @@ COPY scripts ./scripts
 RUN uv sync \
     --frozen \
     --no-dev
+
+# Run as an unprivileged user. It owns /app so job commands that use
+# `uv run` can still update the project environment if needed.
+RUN useradd --create-home --uid 10001 app \
+    && chown -R app:app /app
+
+USER app
 
 ENV PATH="/app/.venv/bin:$PATH"
 

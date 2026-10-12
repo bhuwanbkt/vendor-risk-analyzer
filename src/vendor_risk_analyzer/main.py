@@ -57,6 +57,8 @@ from vendor_risk_analyzer.auth.routes import (
     router as auth_router,
 )
 from vendor_risk_analyzer.auth.bearer import ApiBearerAuthenticationMiddleware
+from vendor_risk_analyzer.security_headers import SecurityHeadersMiddleware
+from vendor_risk_analyzer.version import APP_VERSION
 
 
 # ============================================================
@@ -147,7 +149,7 @@ app = FastAPI(
         "and compliance assessment platform"
     ),
 
-    version="0.2.0",
+    version=APP_VERSION,
 
     # --------------------------------------------------------
     # Public API documentation remains disabled.
@@ -190,6 +192,9 @@ app.add_middleware(
 )
 
 app.add_middleware(ApiBearerAuthenticationMiddleware)
+
+# Added last so it is outermost and also covers error responses.
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 # ============================================================
