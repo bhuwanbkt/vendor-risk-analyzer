@@ -78,6 +78,11 @@ Write mode:
 OPS_WRITE=true
 ```
 
+To re-rate every assessment that is not yet on the current policy
+version, use `OPS_ASSESSMENT_ID=all`. Each assessment is processed in
+its own transaction; the job prints one line per assessment and a
+summary, and exits non-zero if any assessment failed.
+
 The dispatcher defaults to non-writing behavior unless `OPS_WRITE`
 is explicitly truthy.
 
