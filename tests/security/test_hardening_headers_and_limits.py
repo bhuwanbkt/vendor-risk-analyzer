@@ -18,7 +18,12 @@ def test_pages_and_errors_carry_security_headers(security_api):
         headers = response.headers
         assert headers["x-content-type-options"] == "nosniff"
         assert headers["x-frame-options"] == "DENY"
-        assert headers["referrer-policy"] == "strict-origin-when-cross-origin"
+        # Pages may set a stricter policy (sign-in uses no-referrer);
+        # the middleware never overrides a page's own header.
+        assert headers["referrer-policy"] in {
+            "no-referrer",
+            "strict-origin-when-cross-origin",
+        }
         assert "max-age=" in headers["strict-transport-security"]
 
         csp = headers["content-security-policy"]
@@ -62,3 +67,10 @@ def test_requests_rejected_by_csrf_do_not_use_quota(security_api, monkeypatch):
 
     allowed = security_api.client.post(url, headers={"X-CSRF-Token": "test-csrf-token"})
     assert allowed.status_code == 201
+
+
+def test_default_referrer_policy_applies_when_page_sets_none(security_api):
+    response = security_api.client.get("/health")
+
+    assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+
