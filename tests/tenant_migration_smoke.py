@@ -63,10 +63,23 @@ async def seed(connection):
     )
 
 
+def migration_head() -> str:
+    """The newest migration, so this check survives future migrations."""
+    from pathlib import Path
+
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    root = Path(__file__).resolve().parents[1]
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "migrations"))
+    return ScriptDirectory.from_config(config).get_current_head()
+
+
 async def verify(connection):
     assert (
         await connection.fetchval("SELECT version_num FROM alembic_version")
-        == "2e1d4a7b9c60"
+        == migration_head()
     )
     assert (
         await connection.fetchval(
