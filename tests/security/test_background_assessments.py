@@ -6,13 +6,15 @@ from uuid import UUID
 
 import pytest
 
-from vendor_risk_analyzer.api import assessments as assessments_api
 from vendor_risk_analyzer.db.models import Assessment
 
 pytestmark = pytest.mark.security
 
 
 def test_create_assessment_queues_without_calling_gemini(security_api, monkeypatch):
+    # Imported after the fixture has configured test settings.
+    from vendor_risk_analyzer.api import assessments as assessments_api
+
     notified = []
     monkeypatch.setattr(
         assessments_api, "notify_new_assessment", lambda: notified.append(True)

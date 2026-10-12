@@ -6,7 +6,6 @@ from uuid import UUID
 
 import pytest
 
-from vendor_risk_analyzer.api import chat as chat_api
 from vendor_risk_analyzer.db.models import ChatConversation, ChatMessage
 
 pytestmark = pytest.mark.security
@@ -109,6 +108,9 @@ def test_viewers_cannot_use_saved_chat(security_api):
 
 
 def test_answer_is_returned_even_if_saving_fails(security_api, monkeypatch):
+    # Imported after the fixture has configured test settings.
+    from vendor_risk_analyzer.api import chat as chat_api
+
     async def broken(*args, **kwargs):
         raise RuntimeError("database full")
 
