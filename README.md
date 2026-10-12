@@ -415,6 +415,7 @@ The main application endpoints are:
 | POST | `/api/vendors/{vendor_id}/documents/{document_id}/ingest` | Parse the uploaded document and create chunks |
 | POST | `/api/vendors/{vendor_id}/assessments` | Queue an assessment (202); poll `GET /api/assessments/{id}` until `completed` or `failed` |
 | GET | `/api/assessments/{assessment_id}` | Read a saved report |
+| GET | `/api/assessments/{assessment_id}/export?format=pdf\|docx` | Download a completed report as PDF or Word |
 | POST | `/api/chat` | Ask a question with an explicit vendor ID |
 
 Public Swagger/ReDoc/OpenAPI endpoints are disabled. Browser sessions authenticate

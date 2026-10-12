@@ -2290,3 +2290,18 @@ textarea {
     color: var(--red);
 }
 
+
+.report-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+
+    margin-bottom: 12px;
+}
+
+
+.report-actions a {
+    text-decoration: none;
+}
+

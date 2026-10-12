@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from uuid import UUID
+
+from sqlalchemy import select
 
 from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Query,
+    Response,
     status,
 )
 from sqlalchemy.ext.asyncio import (
@@ -17,7 +22,13 @@ from vendor_risk_analyzer.rate_limit import rate_limit
 from vendor_risk_analyzer.assessments import repository
 from vendor_risk_analyzer.assessments.service import ASSESSMENT_TYPE
 from vendor_risk_analyzer.assessments.worker import notify_new_assessment
-from vendor_risk_analyzer.db.models import Assessment
+from vendor_risk_analyzer.assessments.export import (
+    build_docx,
+    build_pdf,
+    export_filename,
+    report_from_response,
+)
+from vendor_risk_analyzer.db.models import Assessment, Vendor
 from vendor_risk_analyzer.auth.dependencies import (
     require_roles,
     verify_csrf,
@@ -120,6 +131,76 @@ async def get_assessment(
 # ============================================================
 # CREATE ASSESSMENT
 # ============================================================
+
+
+EXPORT_FORMATS = {
+    "pdf": (build_pdf, "application/pdf"),
+    "docx": (
+        build_docx,
+        "application/vnd.openxmlformats-officedocument"
+        ".wordprocessingml.document",
+    ),
+}
+
+
+@router.get("/api/assessments/{assessment_id}/export")
+async def export_assessment(
+    assessment_id: UUID,
+    format: str = Query(default="pdf", pattern="^(pdf|docx)$"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(
+        require_roles(
+            "viewer",
+            "analyst",
+            "admin",
+        )
+    ),
+):
+    """Download a completed assessment as PDF or Word."""
+    access = await resolve_access(db, user)
+
+    response = await load_assessment_response(
+        db=db,
+        access=access,
+        assessment_id=assessment_id,
+    )
+
+    if response.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only completed assessments can be exported",
+        )
+
+    vendor_name = await db.scalar(
+        select(Vendor.name).where(Vendor.id == response.vendor_id)
+    )
+
+    report = report_from_response(
+        response,
+        vendor_name=vendor_name or "Vendor",
+    )
+
+    builder, media_type = EXPORT_FORMATS[format]
+
+    # Document rendering is CPU-bound; keep it off the event loop.
+    content = await asyncio.to_thread(builder, report)
+
+    logger.info(
+        "Assessment exported. assessment_id=%s format=%s",
+        assessment_id,
+        format,
+    )
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{export_filename(report, format)}"'
+            ),
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.post(

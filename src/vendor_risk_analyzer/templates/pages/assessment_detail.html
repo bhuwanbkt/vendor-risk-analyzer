@@ -130,6 +130,24 @@
 {% endif %}
 
 
+{% if assessment.status == "completed" %}
+<div class="report-actions">
+    <a
+        class="secondary-button"
+        href="/api/assessments/{{ assessment.id }}/export?format=pdf"
+    >
+        Download PDF
+    </a>
+    <a
+        class="secondary-button"
+        href="/api/assessments/{{ assessment.id }}/export?format=docx"
+    >
+        Download Word
+    </a>
+</div>
+{% endif %}
+
+
 <section class="report-stat-grid">
 
     <div class="report-stat">
