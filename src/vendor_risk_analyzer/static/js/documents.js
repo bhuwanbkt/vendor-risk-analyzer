@@ -129,9 +129,148 @@ async function sha256File(
 }
 
 
-async function loadDocuments(
+// ------------------------------------------------------------
+// Automatic refresh while documents are still being processed.
+//
+// Parsing and embedding continue in the background after the
+// request returns, so the list re-checks itself every few
+// seconds until nothing is in progress. Polling pauses while
+// the tab is hidden and stops when the vendor changes.
+// ------------------------------------------------------------
+
+const IN_PROGRESS_STATUSES =
+    new Set([
+        "processing",
+        "embedding_pending",
+        "embedding",
+    ]);
+
+const POLL_INTERVAL_MS =
+    5000;
+
+let pollTimer =
+    null;
+
+let resumeVendorId =
+    null;
+
+
+function stopPolling() {
+    if (pollTimer !== null) {
+        clearTimeout(
+            pollTimer
+        );
+
+        pollTimer =
+            null;
+    }
+
+    resumeVendorId =
+        null;
+}
+
+
+function scheduleRefresh(
     vendorId
 ) {
+    stopPolling();
+
+    pollTimer =
+        setTimeout(
+            () => {
+                pollTimer =
+                    null;
+
+                // The user switched to another vendor.
+                if (
+                    libraryVendor?.value
+                    !== vendorId
+                ) {
+                    return;
+                }
+
+                // Background tab: resume when it is visible again.
+                if (
+                    window.document.hidden
+                ) {
+                    resumeVendorId =
+                        vendorId;
+
+                    return;
+                }
+
+                loadDocuments(
+                    vendorId,
+                    { silent: true }
+                );
+            },
+            POLL_INTERVAL_MS
+        );
+}
+
+
+function scheduleRefreshIfProcessing(
+    vendorId,
+    documents
+) {
+    // A stale "processing" document is stuck, not progressing;
+    // it shows a Retry button instead of being polled.
+    const stillWorking =
+        documents.some(
+            doc =>
+                IN_PROGRESS_STATUSES.has(
+                    doc.status
+                )
+                &&
+                doc.stale_processing
+                !== true
+        );
+
+    if (stillWorking) {
+        scheduleRefresh(
+            vendorId
+        );
+    }
+}
+
+
+window.document.addEventListener(
+    "visibilitychange",
+    () => {
+        if (
+            window.document.hidden
+            ||
+            resumeVendorId === null
+        ) {
+            return;
+        }
+
+        const vendorId =
+            resumeVendorId;
+
+        resumeVendorId =
+            null;
+
+        if (
+            libraryVendor?.value
+            === vendorId
+        ) {
+            loadDocuments(
+                vendorId,
+                { silent: true }
+            );
+        }
+    }
+);
+
+
+async function loadDocuments(
+    vendorId,
+    { silent = false } = {}
+) {
+    // Any explicit or automatic load replaces a pending refresh.
+    stopPolling();
+
     if (!vendorId) {
         documentList.innerHTML =
             `
@@ -147,12 +286,16 @@ async function loadDocuments(
     }
 
 
-    documentList.innerHTML =
-        `
-        <div class="empty-state">
-            Loading documents...
-        </div>
-        `;
+    // Automatic refreshes update the list in place without
+    // flashing a loading message.
+    if (!silent) {
+        documentList.innerHTML =
+            `
+            <div class="empty-state">
+                Loading documents...
+            </div>
+            `;
+    }
 
 
     try {
@@ -295,7 +438,23 @@ async function loadDocuments(
                 )
                 .join("");
 
+
+        scheduleRefreshIfProcessing(
+            vendorId,
+            body
+        );
+
     } catch (error) {
+        // A failed background refresh keeps the current list
+        // and tries again later.
+        if (silent) {
+            scheduleRefresh(
+                vendorId
+            );
+
+            return;
+        }
+
         documentList.innerHTML =
             `
             <div class="empty-state error-text">
