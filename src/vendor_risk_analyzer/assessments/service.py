@@ -280,6 +280,10 @@ class AssessmentPersistenceService:
                         analysis
                         .normalized_finding_count
                     ),
+                "category_coverage": [
+                    item.model_dump()
+                    for item in analysis.coverage
+                ],
                 "severity_policy":
                     "unrated-v1",
                 "persistence_version":

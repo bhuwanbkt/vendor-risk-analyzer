@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import (
     BaseModel,
     Field,
+    field_validator,
 )
 
 
@@ -54,6 +55,59 @@ class RiskSignal(BaseModel):
     )
 
 
+ModelCoverageStatus = Literal[
+    "assessed",
+    "insufficient_evidence",
+]
+
+
+# Final coverage states stored on an assessment:
+# - assessed: the evidence addresses the category
+# - insufficient_evidence: evidence was retrieved but does not
+#   meaningfully address the category
+# - no_evidence: retrieval returned nothing for the category
+# - not_reported: the model omitted the category
+CoverageStatus = Literal[
+    "assessed",
+    "insufficient_evidence",
+    "no_evidence",
+    "not_reported",
+]
+
+
+COVERAGE_NOTE_MAX_LENGTH = 300
+
+
+class CategoryCoverage(BaseModel):
+    """Model-reported coverage for one risk category."""
+
+    category: RiskCategory
+    status: ModelCoverageStatus
+    note: str = Field(
+        default="",
+        max_length=COVERAGE_NOTE_MAX_LENGTH,
+    )
+
+    @field_validator("note", mode="before")
+    @classmethod
+    def truncate_note(cls, value):
+        # An overlong note must not fail the whole assessment.
+        if isinstance(value, str):
+            return value.strip()[:COVERAGE_NOTE_MAX_LENGTH]
+        return value
+
+
+class CategoryCoverageResult(BaseModel):
+    """Final per-category coverage persisted with an assessment."""
+
+    category: RiskCategory
+    status: CoverageStatus
+    evidence_chunks: int = Field(ge=0)
+    top_similarity: float | None = None
+    finding_count: int = Field(ge=0)
+    note: str = ""
+
+
 class EvidenceAnalysis(BaseModel):
     summary: str = Field(
         min_length=10,
@@ -61,6 +115,9 @@ class EvidenceAnalysis(BaseModel):
     )
 
     findings: list[RiskSignal]
+    category_coverage: list[CategoryCoverage] = Field(
+        default_factory=list,
+    )
 
 
 class RiskEvidence(BaseModel):
@@ -91,3 +148,6 @@ class VendorRiskAnalysisResult(
     raw_finding_count: int
 
     normalized_finding_count: int
+    coverage: list[CategoryCoverageResult] = Field(
+        default_factory=list,
+    )

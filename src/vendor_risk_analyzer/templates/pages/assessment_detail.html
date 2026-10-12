@@ -367,6 +367,88 @@
 </section>
 
 
+{% set coverage = assessment.extra_data.get("category_coverage") or [] %}
+
+{% if coverage %}
+
+<section class="report-section">
+
+    <div class="section-title">
+
+        <span class="eyebrow">
+            Assessment coverage
+        </span>
+
+        <h2>
+            What the evidence covered
+        </h2>
+
+        <p class="coverage-hint">
+            A category without findings is not proof of a strong
+            control. Check categories marked "No evidence" or
+            "Insufficient evidence" before relying on this report.
+        </p>
+
+    </div>
+
+
+    <div class="table-wrap">
+
+        <table class="data-table coverage-table">
+
+            <thead>
+                <tr>
+                    <th>Category</th>
+                    <th>Coverage</th>
+                    <th>Findings</th>
+                    <th>Evidence chunks</th>
+                    <th>Note</th>
+                </tr>
+            </thead>
+
+            <tbody>
+
+                {% for item in coverage %}
+
+                <tr>
+
+                    <td>
+                        {{ (item.category or "") | replace("_", " ") | title }}
+                    </td>
+
+                    <td>
+                        <span class="status-pill coverage-{{ item.status or 'not_reported' }}">
+                            {{ (item.status or "not_reported") | replace("_", " ") }}
+                        </span>
+                    </td>
+
+                    <td>
+                        {{ item.finding_count or 0 }}
+                    </td>
+
+                    <td>
+                        {{ item.evidence_chunks or 0 }}
+                    </td>
+
+                    <td>
+                        {{ item.note or "" }}
+                    </td>
+
+                </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</section>
+
+{% endif %}
+
+
 <details class="technical-panel">
 
     <summary>

@@ -2211,3 +2211,32 @@ textarea {
             column;
     }
 }
+
+
+/* ============================================================
+   ASSESSMENT COVERAGE
+   ============================================================ */
+
+.coverage-hint {
+    margin-top: 6px;
+
+    color: var(--text-muted);
+
+    font-size: 13px;
+}
+
+
+.status-pill.coverage-insufficient_evidence,
+.status-pill.coverage-not_reported {
+    background: #fffaeb;
+
+    color: #b54708;
+}
+
+
+.status-pill.coverage-no_evidence {
+    background: #fef3f2;
+
+    color: #b42318;
+}
+

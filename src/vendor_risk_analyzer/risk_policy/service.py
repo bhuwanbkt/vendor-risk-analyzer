@@ -24,7 +24,7 @@ logger = logging.getLogger(
 
 
 POLICY_VERSION = (
-    "vendor-risk-policy-v1"
+    "vendor-risk-policy-v2"
 )
 
 
@@ -37,38 +37,159 @@ SEVERITY_RANK = {
 }
 
 
-POLICY_RULES = {
+# ------------------------------------------------------------
+# Severity matrix: category -> finding type -> severity.
+#
+# Rules never assign "critical"; a critical rating requires
+# analyst judgement beyond what a document-only rule can show.
+#
+#   explicit_risk  - the source itself describes an open risk
+#   contradiction  - sources disagree about the same control
+#   evidence_gap   - the source says required evidence is missing
+# ------------------------------------------------------------
+
+SEVERITY_MATRIX = {
+    "access_control": {
+        "explicit_risk": "high",
+        "contradiction": "medium",
+        "evidence_gap": "medium",
+    },
+    "encryption": {
+        "explicit_risk": "high",
+        "contradiction": "medium",
+        "evidence_gap": "medium",
+    },
+    "incident_response": {
+        "explicit_risk": "high",
+        "contradiction": "medium",
+        "evidence_gap": "medium",
+    },
+    "vulnerability_management": {
+        "explicit_risk": "high",
+        "contradiction": "medium",
+        "evidence_gap": "medium",
+    },
+    "privacy": {
+        "explicit_risk": "high",
+        "contradiction": "medium",
+        "evidence_gap": "medium",
+    },
+    "business_continuity": {
+        "explicit_risk": "medium",
+        "contradiction": "medium",
+        "evidence_gap": "medium",
+    },
+    "data_retention": {
+        "explicit_risk": "medium",
+        "contradiction": "medium",
+        "evidence_gap": "low",
+    },
+    "third_party": {
+        "explicit_risk": "medium",
+        "contradiction": "medium",
+        "evidence_gap": "low",
+    },
+    "ai_governance": {
+        "explicit_risk": "medium",
+        "contradiction": "medium",
+        "evidence_gap": "low",
+    },
+    "other": {
+        "explicit_risk": "low",
+        "contradiction": "low",
+        "evidence_gap": "low",
+    },
+}
+
+
+CATEGORY_CODES = {
+    "access_control": "AC",
+    "encryption": "ENC",
+    "incident_response": "IR",
+    "vulnerability_management": "VM",
+    "privacy": "PRV",
+    "business_continuity": "BC",
+    "data_retention": "RET",
+    "third_party": "TP",
+    "ai_governance": "AIG",
+    "other": "OTH",
+}
+
+
+TYPE_CODES = {
+    "explicit_risk": "EXPLICIT",
+    "contradiction": "CONTRADICTION",
+    "evidence_gap": "GAP",
+}
+
+
+RATIONALE_TEMPLATES = {
+    "explicit_risk": (
+        "The vendor's documents describe an open "
+        "{label} risk or issue that requires "
+        "remediation tracking."
+    ),
+    "contradiction": (
+        "The vendor's documents make conflicting "
+        "{label} statements, so the actual control "
+        "requires analyst review."
+    ),
+    "evidence_gap": (
+        "The vendor's documents state that required "
+        "{label} evidence is missing or incomplete."
+    ),
+}
+
+
+# Original v1 rules keep their exact rationale text.
+RATIONALE_OVERRIDES = {
     (
         "contradiction",
         "incident_response",
-    ): {
-        "severity": "medium",
-        "rule_id": (
-            "VRP-IR-CONTRADICTION-001"
-        ),
-        "rationale": (
-            "Conflicting incident-response "
-            "requirements require analyst "
-            "review because they may create "
-            "operational ambiguity."
-        ),
-    },
-
+    ): (
+        "Conflicting incident-response "
+        "requirements require analyst "
+        "review because they may create "
+        "operational ambiguity."
+    ),
     (
         "explicit_risk",
         "business_continuity",
-    ): {
-        "severity": "medium",
-        "rule_id": (
-            "VRP-BC-EXPLICIT-001"
-        ),
-        "rationale": (
-            "An explicitly documented open "
-            "business-continuity issue "
-            "requires remediation tracking."
-        ),
-    },
+    ): (
+        "An explicitly documented open "
+        "business-continuity issue "
+        "requires remediation tracking."
+    ),
 }
+
+
+def _build_policy_rules() -> dict[tuple[str, str], dict[str, str]]:
+    rules = {}
+
+    for category, severities in SEVERITY_MATRIX.items():
+        label = category.replace("_", " ")
+
+        for finding_type, severity in severities.items():
+            key = (finding_type, category)
+
+            rules[key] = {
+                "severity": severity,
+                "rule_id": (
+                    f"VRP-{CATEGORY_CODES[category]}-"
+                    f"{TYPE_CODES[finding_type]}-001"
+                ),
+                "rationale": RATIONALE_OVERRIDES.get(
+                    key,
+                    RATIONALE_TEMPLATES[finding_type].format(
+                        label=label
+                    ),
+                ),
+            }
+
+    return rules
+
+
+POLICY_RULES = _build_policy_rules()
 
 
 class RiskPolicyError(
