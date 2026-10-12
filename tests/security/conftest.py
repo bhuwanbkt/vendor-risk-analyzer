@@ -94,6 +94,10 @@ def security_api(monkeypatch):
     }
     for name, value in values.items():
         monkeypatch.setenv(name, value)
+    # Rate-limit counters are per process; start every test fresh.
+    from vendor_risk_analyzer.rate_limit import limiter as rate_limiter
+
+    rate_limiter.reset()
 
     from vendor_risk_analyzer.config import get_settings
 

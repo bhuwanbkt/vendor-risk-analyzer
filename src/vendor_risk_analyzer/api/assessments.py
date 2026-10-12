@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession,
 )
 
+from vendor_risk_analyzer.rate_limit import rate_limit
 from vendor_risk_analyzer.assessments import repository
 from vendor_risk_analyzer.assessments.service import (
     AssessmentPersistenceError,
@@ -156,6 +157,9 @@ async def create_assessment(
     ),
     _: None = Depends(
         verify_csrf
+    ),
+    _rate_limit: None = Depends(
+        rate_limit("assessment")
     ),
 ):
     """

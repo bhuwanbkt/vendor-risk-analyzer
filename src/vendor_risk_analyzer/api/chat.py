@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from vendor_risk_analyzer.rate_limit import rate_limit
 from vendor_risk_analyzer.auth.access import require_vendor_access
 
 from fastapi import (
@@ -72,6 +73,9 @@ async def vendor_chat(
     ),
     _: None = Depends(
         verify_csrf
+    ),
+    _rate_limit: None = Depends(
+        rate_limit("chat")
     ),
 ):
     """

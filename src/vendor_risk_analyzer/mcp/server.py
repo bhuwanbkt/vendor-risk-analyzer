@@ -29,6 +29,7 @@ from starlette.applications import Starlette
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
 
+from vendor_risk_analyzer.rate_limit import RateLimitExceeded, enforce as enforce_rate_limit
 from vendor_risk_analyzer.assessments.repository import (
     AssessmentNotFoundError,
     load_assessment_response,
@@ -408,6 +409,18 @@ def create_mcp_application(
         async with session_factory() as db:
             access = await tool_access(db)
             await require_vendor(db, vendor_id, access)
+            # Shares the per-user chat limit with the HTTP API.
+            try:
+                enforce_rate_limit(
+                    "chat",
+                    organization_id=access.tenant.zitadel_org_id,
+                    subject=access.member.subject,
+                )
+            except RateLimitExceeded as exc:
+                raise ToolError(
+                    "Too many requests. Try again in "
+                    f"{exc.retry_after} seconds."
+                ) from exc
             embedding = None
             try:
                 embedding = EmbeddingService()

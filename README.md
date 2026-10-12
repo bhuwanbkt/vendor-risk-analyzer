@@ -371,6 +371,20 @@ After changing roles, sign out and sign in again to refresh the application
 session. Close every Incognito window before testing a fresh Incognito session.
 Provider account selection and session termination still need a live browser check.
 
+## Security Headers and Rate Limits
+
+Every response carries a strict Content-Security-Policy (same-origin scripts and
+styles only; the object-storage endpoint for signed uploads and the ZITADEL
+issuer for sign-in are the only external origins), plus `X-Content-Type-Options`,
+`X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, and HSTS when secure
+cookies are enabled.
+
+Requests that call Gemini are limited per user and company:
+`ASSESSMENT_RATE_LIMIT_PER_HOUR` (default 20) for new assessments and
+`CHAT_RATE_LIMIT_PER_MINUTE` (default 20) for chat and the MCP `ask_vendor` tool.
+Exceeding a limit returns HTTP 429 with `Retry-After`. Counts are kept in process
+memory, so each application replica enforces its own limit.
+
 ## API Access
 
 The main application endpoints are:

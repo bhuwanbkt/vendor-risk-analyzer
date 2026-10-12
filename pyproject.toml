@@ -1,7 +1,7 @@
 [project]
 name = "vendor-risk-analyzer"
 version = "0.1.0"
-description = "Add your description here"
+description = "Evidence-grounded vendor security risk assessments with RAG, deterministic policy, and MCP tools"
 readme = "README.md"
 authors = [
     { name = "Bhuwan Bokati", email = "bhuwanbkt2@gmail.com" }
