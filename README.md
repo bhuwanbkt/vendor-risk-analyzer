@@ -532,6 +532,14 @@ pip compatibility.
 | `EMBEDDING_WORKER_IDLE_MAX_SECONDS`, `ASSESSMENT_WORKER_IDLE_MAX_SECONDS` | `600`, `600` | Longest wait between checks of an empty queue (see below) |
 | `ASSESSMENT_RATE_LIMIT_PER_HOUR`, `CHAT_RATE_LIMIT_PER_MINUTE` | `20`, `20` | Per-user limits (`0` disables) |
 
+**Monitoring**
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `SENTRY_DSN` | — | Turn on Sentry error tracking (off when unset) |
+| `SENTRY_ENVIRONMENT` | `APP_ENV` | Environment name shown in Sentry |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0` | Share of requests traced for performance (0–1) |
+
 Keep `RISK_LLM_MODEL` and `EMBEDDING_MODEL` identical on the application and on
 any job that runs analysis or evaluation.
 
@@ -643,6 +651,17 @@ continuous deployment, run the migration first, then deploy.
 
 Check the applied revision with `SELECT version_num FROM alembic_version;`. See
 [Operational scripts](scripts/README.md) for every utility task.
+
+**Health checks:** point the platform's frequent liveness check at `/health`,
+which does not touch the database. `/ready` runs a query, so polling it every few
+seconds keeps a serverless database from ever suspending.
+
+**Error tracking:** set `SENTRY_DSN` to report unhandled request errors and every
+worker failure (workers log failures with `logger.exception`, which Sentry
+captures). Sentry's free Developer plan is enough for one project. Vendor content
+is kept out: request bodies, cookies, auth and CSRF headers, client IPs, stack
+frame variables, and Gemini prompts/answers are never sent, and performance
+tracing is off unless `SENTRY_TRACES_SAMPLE_RATE` is raised.
 
 ## Limitations
 

@@ -58,6 +58,7 @@ from vendor_risk_analyzer.auth.routes import (
     router as auth_router,
 )
 from vendor_risk_analyzer.auth.bearer import ApiBearerAuthenticationMiddleware
+from vendor_risk_analyzer.observability import init_error_tracking
 from vendor_risk_analyzer.security_headers import SecurityHeadersMiddleware
 from vendor_risk_analyzer.version import APP_VERSION
 
@@ -105,6 +106,9 @@ BASE_DIR = (
 )
 
 settings = get_settings()
+
+# Before the app is built so the FastAPI integration can hook it.
+init_error_tracking()
 
 mcp_application = None
 if settings.mcp_enabled:
