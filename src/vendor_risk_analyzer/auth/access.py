@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from vendor_risk_analyzer.auth.organizations import scoped_identity
+from vendor_risk_analyzer.db.tenant_context import bind_tenant
 from vendor_risk_analyzer.db.models import (
     Tenant,
     TenantMembership,
@@ -47,6 +48,9 @@ async def resolve_access(db, user: dict) -> AccessContext:
     tenant = await db.scalar(select(Tenant).where(Tenant.zitadel_org_id == org))
     if tenant is None:
         raise HTTPException(403, "Your company has not been configured for this app")
+    # From here on, PostgreSQL row-level security limits every query on this
+    # session to the caller's company.
+    await bind_tenant(db, tenant.id)
     query = select(TenantMembership).where(
         TenantMembership.tenant_id == tenant.id, TenantMembership.subject == user["sub"]
     )

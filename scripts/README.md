@@ -11,8 +11,11 @@ lifecycle helpers in `vendor_risk_analyzer.embeddings.repository`.
 automatic processing without opening database or Gemini clients for the worker.
 The local `.env.example` disables it until a Gemini API key is configured.
 
-Transient database failures during startup recovery or polling are retried
-after `EMBEDDING_WORKER_POLL_SECONDS`. Stale-document recovery runs at startup
+When there is nothing to embed, the wait between checks backs off from
+`EMBEDDING_WORKER_POLL_SECONDS` up to `EMBEDDING_WORKER_IDLE_MAX_SECONDS`
+(default 600) so a serverless database can suspend; ingesting a document wakes
+the worker immediately. Transient database failures during startup recovery or
+polling are retried after `EMBEDDING_WORKER_POLL_SECONDS`. Stale-document recovery runs at startup
 and every `EMBEDDING_WORKER_STALE_MINUTES`, so interrupted documents can be
 recovered later without restarting the service. Processing renews the document
 timestamp before each batch to keep active claims fresh. Database connections
@@ -90,7 +93,7 @@ is explicitly truthy.
 
 ```text
 OPS_TASK=run_eval
-OPS_EVAL_CASES=larkspur=<vendor UUID>,brightwater=<vendor UUID>
+OPS_EVAL_CASES=larkspur=<vendor UUID>,brightwater=<vendor UUID>,quillfeather=<vendor UUID>
 OPS_EVAL_RUNS=3
 ```
 

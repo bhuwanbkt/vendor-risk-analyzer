@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     # Per-user limits for endpoints that call Gemini; 0 disables.
     assessment_rate_limit_per_hour: int = Field(default=20, ge=0, le=10_000)
     chat_rate_limit_per_minute: int = Field(default=20, ge=0, le=10_000)
+    # "database" shares limits across instances; "memory" is per process.
+    rate_limit_backend: Literal["database", "memory"] = "database"
     mcp_enabled: bool = False
     mcp_public_url: AnyHttpUrl | None = None
 

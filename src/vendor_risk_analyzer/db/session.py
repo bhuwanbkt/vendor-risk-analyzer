@@ -10,6 +10,9 @@ from collections.abc import AsyncGenerator
 
 from vendor_risk_analyzer.config import get_settings
 
+# Registers the row-level security listener on every ORM session.
+from vendor_risk_analyzer.db import tenant_context  # noqa: F401
+
 
 settings = get_settings()
 
@@ -47,6 +50,9 @@ engine = create_async_engine(
     max_overflow=settings.database_max_overflow,
     pool_pre_ping=True,
     pool_recycle=300,
+    # Keep row values (document text, chat questions) out of SQL error
+    # messages, logs, and error tracking.
+    hide_parameters=True,
 )
 
 

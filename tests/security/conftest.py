@@ -207,6 +207,40 @@ def security_api(monkeypatch):
 
     monkeypatch.setattr(audit_service, "session_factory", AuditCollector)
 
+    # Token usage is also written on its own session; collect it the same way.
+    usage_events = []
+
+    class UsageCollector(AuditCollector):
+        def add(self, value):
+            usage_events.append(value)
+
+    from vendor_risk_analyzer.usage import service as usage_service
+
+    monkeypatch.setattr(usage_service, "session_factory", UsageCollector)
+
+    # Shared rate limits run their real SQL against a separate database,
+    # so they never appear in db.calls.
+    from vendor_risk_analyzer import rate_limit as rate_limit_module
+    from vendor_risk_analyzer.db.models import RateLimitBucket
+
+    limit_engine = create_engine(
+        "sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False}
+    )
+    RateLimitBucket.__table__.create(limit_engine)
+
+    class RateLimitSession(LocalAsyncSession):
+        def __init__(self):
+            super().__init__(Session(limit_engine, expire_on_commit=False))
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            self.session.close()
+            return False
+
+    monkeypatch.setattr(rate_limit_module, "session_factory", RateLimitSession)
+
     async def local_database():
         yield db
 
@@ -299,11 +333,13 @@ def security_api(monkeypatch):
             assert_no_work=assert_no_work,
             tenant=tenant,
             audit_events=audit_events,
+            usage_events=usage_events,
         )
 
     main.app.dependency_overrides.pop(get_db, None)
     session.close()
     engine.dispose()
+    limit_engine.dispose()
     get_settings.cache_clear()
 
 

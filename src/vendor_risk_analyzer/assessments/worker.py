@@ -34,7 +34,15 @@ from vendor_risk_analyzer.assessments.service import (
 )
 from vendor_risk_analyzer.audit.service import record_event
 from vendor_risk_analyzer.db.models import Assessment, Vendor
+from vendor_risk_analyzer.db.tenant_context import bind_tenant, enable_system_access
 from vendor_risk_analyzer.db.url import get_database_url
+from vendor_risk_analyzer.usage.service import record_usage
+from vendor_risk_analyzer.usage.tokens import TokenUsage
+from vendor_risk_analyzer.idle_backoff import (
+    IdleBackoff,
+    idle_max_seconds,
+    wait_for_work,
+)
 from vendor_risk_analyzer.embeddings.service import EmbeddingError, EmbeddingService
 from vendor_risk_analyzer.retrieval.service import SemanticRetriever
 from vendor_risk_analyzer.risk_analysis.service import (
@@ -252,6 +260,45 @@ async def audit_job(
         logger.exception("Could not audit assessment %s", assessment_id)
 
 
+async def record_job_usage(session_factory, assessment_id: UUID, risk_service) -> None:
+    """Record the Gemini tokens an assessment used, even if it failed."""
+    usage = getattr(risk_service, "token_usage", None)
+    if not isinstance(usage, TokenUsage) or usage.requests == 0:
+        return
+    try:
+        async with session_factory() as db:
+            row = (
+                await db.execute(
+                    select(Assessment.vendor_id, Assessment.extra_data, Vendor.tenant_id)
+                    .join(Vendor, Vendor.id == Assessment.vendor_id)
+                    .where(Assessment.id == assessment_id)
+                )
+            ).first()
+        if row is None:
+            return
+        vendor_id, metadata, tenant_id = row
+        await record_usage(
+            tenant_id=tenant_id,
+            vendor_id=vendor_id,
+            feature="assessment",
+            model=getattr(risk_service, "model", "unknown"),
+            usage=usage,
+            reference_id=assessment_id,
+            actor_subject=(metadata or {}).get("requested_by"),
+            factory=session_factory,
+        )
+    except Exception:
+        logger.exception("Could not record usage for assessment %s", assessment_id)
+
+
+async def bind_vendor_company(db, vendor_id) -> None:
+    if not hasattr(db, "scalar"):
+        return  # test double
+    tenant_id = await db.scalar(select(Vendor.tenant_id).where(Vendor.id == vendor_id))
+    if tenant_id is not None:
+        await bind_tenant(db, tenant_id)
+
+
 async def run_assessment_job(session_factory, assessment_id: UUID) -> str:
     """Run one claimed assessment to completion. Returns the final status."""
 
@@ -268,6 +315,9 @@ async def run_assessment_job(session_factory, assessment_id: UUID) -> str:
             if assessment is None:
                 return "missing"
             vendor_id = str(assessment.vendor_id)
+            # Row-level security: retrieval, saving and scoring for this job
+            # can only see the vendor's own company.
+            await bind_vendor_company(db, assessment.vendor_id)
 
             embedding_service = EmbeddingService()
             risk_service = RiskAnalysisService(
@@ -296,11 +346,18 @@ async def run_assessment_job(session_factory, assessment_id: UUID) -> str:
             await db.refresh(assessment)
             assessment.status = "completed"
             assessment.completed_at = datetime.now(timezone.utc)
-            assessment.extra_data = {
+            extra = {
                 **(assessment.extra_data or {}),
                 "progress": {"stage": "completed", "message": "Completed"},
                 "duration_seconds": round(time.perf_counter() - started, 1),
             }
+            usage = getattr(risk_service, "token_usage", None)
+            if isinstance(usage, TokenUsage) and usage.requests:
+                extra["llm_usage"] = {
+                    "model": getattr(risk_service, "model", None),
+                    **usage.as_dict(),
+                }
+            assessment.extra_data = extra
             await db.commit()
 
         logger.info(
@@ -308,6 +365,7 @@ async def run_assessment_job(session_factory, assessment_id: UUID) -> str:
             assessment_id,
             time.perf_counter() - started,
         )
+        await record_job_usage(session_factory, assessment_id, risk_service)
         await audit_job(
             session_factory,
             assessment_id,
@@ -338,6 +396,7 @@ async def run_assessment_job(session_factory, assessment_id: UUID) -> str:
             await mark_failed(session_factory, assessment_id, message)
         except Exception:
             logger.exception("Could not mark assessment %s failed", assessment_id)
+        await record_job_usage(session_factory, assessment_id, risk_service)
         await audit_job(
             session_factory,
             assessment_id,
@@ -381,18 +440,28 @@ async def run_assessment_worker() -> None:
 
     poll_seconds = _int_env("ASSESSMENT_WORKER_POLL_SECONDS", 5, 1)
     stale_minutes = _int_env("ASSESSMENT_STALE_MINUTES", 15, 5)
+    idle_max = idle_max_seconds(
+        "ASSESSMENT_WORKER_IDLE_MAX_SECONDS", minimum=poll_seconds
+    )
+    backoff = IdleBackoff(poll_seconds, idle_max)
 
     engine = create_async_engine(
         get_database_url(),
         poolclass=NullPool,
         pool_pre_ping=True,
+        hide_parameters=True,
     )
+    # Claims and status updates span every company; each job's analysis
+    # is narrowed to its vendor's company (see run_assessment_job).
+    enable_system_access(engine)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     next_recovery_at = time.monotonic()
 
     logger.info(
-        "Background assessment worker started. poll=%ss stale=%smin",
+        "Background assessment worker started. poll=%ss idle_max=%ss "
+        "stale=%smin",
         poll_seconds,
+        idle_max,
         stale_minutes,
     )
 
@@ -415,11 +484,13 @@ async def run_assessment_worker() -> None:
                 assessment_id = await claim_next_assessment(session_factory)
 
                 if assessment_id is None:
-                    try:
-                        await asyncio.wait_for(_wake.wait(), timeout=poll_seconds)
-                    except TimeoutError:
-                        pass
+                    # Back off while idle so the database can suspend;
+                    # a new assessment from this process wakes us at once.
+                    if await wait_for_work(_wake, backoff.next_delay()):
+                        backoff.reset()
                     continue
+
+                backoff.reset()
 
                 logger.info(
                     "Claimed assessment %s for background processing.",

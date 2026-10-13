@@ -6,6 +6,7 @@ import asyncio
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
+from vendor_risk_analyzer.db.tenant_context import enable_system_access
 from vendor_risk_analyzer.db.url import (
     get_database_url,
 )
@@ -105,6 +106,8 @@ async def main() -> int:
             pool_pre_ping=True,
         )
     )
+    # Operations work across companies (row-level security).
+    enable_system_access(engine)
 
     embedding_service = (
         EmbeddingService()

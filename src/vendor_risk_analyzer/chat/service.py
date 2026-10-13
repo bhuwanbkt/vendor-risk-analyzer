@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession,
 )
 
+from vendor_risk_analyzer.usage.tokens import TokenUsage
 from vendor_risk_analyzer.chat.schemas import (
     ChatHistoryMessage,
     ChatResponse,
@@ -91,6 +92,11 @@ class ChatService:
             or "gemini-3.5-flash-lite"
         )
 
+
+    @property
+    def token_usage(self) -> TokenUsage:
+        """Gemini tokens used by this service instance so far."""
+        return getattr(self, "usage", None) or TokenUsage()
 
     async def answer(
         self,
@@ -432,6 +438,12 @@ adding any claims or citations:
 
 
                 body = response.json()
+
+                # Count tokens before validating: a rejected answer
+                # still cost them.
+                self.usage = self.token_usage + (
+                    TokenUsage.from_generate_content(body)
+                )
 
                 try:
                     parts = (

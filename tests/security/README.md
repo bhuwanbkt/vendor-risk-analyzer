@@ -81,6 +81,15 @@ validate PostgreSQL/pgvector search. The CI Compose job migrates existing Postgr
 records, verifies tenant constraints, and compares the migrated schema with the ORM.
 The OIDC tests do not exercise ZITADEL's hosted login UI, its browser SSO cookies,
 or actual provider session termination. A separate CI Compose job exercises real
-PostgreSQL/pgvector migrations and private MinIO uploads/downloads/ingestion.
+PostgreSQL/pgvector migrations and private MinIO uploads/downloads/ingestion, and
+`tests/rls_smoke.py` checks the row-level security policies on every company table
+with a restricted role (no company: no rows; one company: only its rows; writes into
+another company rejected; system access sees all). Here, requests are checked to bind
+their session to the caller's company before reading company data.
+
+Usage and rate-limit tests: chat answers record their token usage (including retried
+answers), the System page shows only the admin's company, and rate limits are shared
+through the database: a limit reached on one instance applies to another, and a
+database outage falls back to the per-process limit.
 Hosted provider behavior, production object storage, Gemini, vector retrieval
 quality, and Northflank deployment still require live integration validation.

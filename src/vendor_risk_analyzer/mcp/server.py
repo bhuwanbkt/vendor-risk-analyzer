@@ -30,6 +30,7 @@ from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
 
 from vendor_risk_analyzer.audit.service import record as audit
+from vendor_risk_analyzer.usage.service import record_chat_usage
 from vendor_risk_analyzer.rate_limit import RateLimitExceeded, enforce as enforce_rate_limit
 from vendor_risk_analyzer.assessments.repository import (
     AssessmentNotFoundError,
@@ -412,7 +413,7 @@ def create_mcp_application(
             await require_vendor(db, vendor_id, access)
             # Shares the per-user chat limit with the HTTP API.
             try:
-                enforce_rate_limit(
+                await enforce_rate_limit(
                     "chat",
                     organization_id=access.tenant.zitadel_org_id,
                     subject=access.member.subject,
@@ -432,6 +433,7 @@ def create_mcp_application(
                 details={"question_length": len(question), "via": "mcp"},
             )
             embedding = None
+            service = None
             try:
                 embedding = EmbeddingService()
                 service = ChatService(retriever=SemanticRetriever(embedding))
@@ -450,6 +452,14 @@ def create_mcp_application(
             finally:
                 if embedding is not None:
                     await embedding.close()
+                await record_chat_usage(
+                    service,
+                    tenant_id=access.tenant.id,
+                    actor_subject=access.member.subject,
+                    vendor_id=vendor_id,
+                    reference_id=None,
+                    feature="mcp_chat",
+                )
 
     url = urlsplit(str(settings.mcp_public_url))
     app = server.streamable_http_app(

@@ -74,3 +74,10 @@ def test_default_referrer_policy_applies_when_page_sets_none(security_api):
 
     assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
 
+
+def test_app_database_engine_hides_sql_parameters(security_api):
+    from vendor_risk_analyzer.db.session import engine
+
+    # SQL errors then show "[SQL parameters hidden]" instead of row values,
+    # so logs and error tracking never contain document text or questions.
+    assert engine.sync_engine.hide_parameters is True

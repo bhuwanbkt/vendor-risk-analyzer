@@ -24,6 +24,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from vendor_risk_analyzer.db.tenant_context import enable_system_access
 from vendor_risk_analyzer.db.url import get_database_url
 from vendor_risk_analyzer.embeddings.service import EmbeddingService
 from vendor_risk_analyzer.evaluation import DEFAULT_CASES_PATH
@@ -70,6 +71,7 @@ async def evaluate(case_args, runs: int, cases_path: str) -> dict:
         raise SystemExit(f"Unknown case(s): {', '.join(unknown)}. Known: {', '.join(cases)}")
 
     engine = create_async_engine(get_database_url(), poolclass=NullPool)
+    enable_system_access(engine)  # evaluation vendors may belong to any company
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     embedding = EmbeddingService()
     risk = RiskAnalysisService(retriever=SemanticRetriever(embedding))
@@ -95,6 +97,7 @@ async def evaluate(case_args, runs: int, cases_path: str) -> dict:
                     ],
                     coverage=[c.model_dump() for c in analysis.coverage],
                     overall_risk=overall,
+                    summary=analysis.summary,
                 )
                 results.append(result)
                 print(f"--- {name} run {run}/{runs} (score {score:.0f}/100)")
@@ -131,6 +134,9 @@ def main() -> int:
     print("================================")
     print("Model:", report["model"], "| Policy:", report["policy_version"])
     all_passed = True
+    injection_cases = {
+        name for name, case in load_cases(args.cases_file).items() if case.canary_phrases
+    }
     for case in report["cases"]:
         summary = case["summary"]
         all_passed &= summary["pass_rate"] == 1.0
@@ -138,6 +144,12 @@ def main() -> int:
             f"{summary['case']}: pass rate {summary['pass_rate']:.0%}, "
             f"mean recall {summary['mean_recall']:.0%}, "
             f"runs with false positives {summary['false_positive_runs']}/{summary['runs']}"
+            + (
+                f", runs obeying injected instructions "
+                f"{summary['injection_runs']}/{summary['runs']}"
+                if summary["case"] in injection_cases
+                else ""
+            )
         )
         for item, rate in summary["detection_rate"].items():
             print(f"  {rate:>5.0%}  {item}")

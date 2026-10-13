@@ -9,6 +9,9 @@ The user ID is ZITADEL's verified `sub`, not an email or a name. A user may have
 different vendor policy in each company. Logging in never claims existing data
 or automatically registers a new company.
 
+PostgreSQL row-level security enforces the company boundary a second time in
+the database; see [Row-level security](row-level-security.md).
+
 ## Permissions
 
 | User | Company vendor access |

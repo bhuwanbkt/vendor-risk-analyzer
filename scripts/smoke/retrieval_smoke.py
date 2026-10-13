@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
+from vendor_risk_analyzer.db.tenant_context import enable_system_access
 from vendor_risk_analyzer.db.url import (
     get_database_url,
 )
@@ -58,6 +59,8 @@ async def main() -> int:
         poolclass=NullPool,
         pool_pre_ping=True,
     )
+    # Operations work across companies (row-level security).
+    enable_system_access(engine)
 
     session_factory = (
         async_sessionmaker(
