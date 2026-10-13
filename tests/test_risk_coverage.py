@@ -165,3 +165,15 @@ def test_deduplication_keeps_model_coverage():
     assert [item.category for item in normalized.category_coverage] == [
         "encryption"
     ]
+
+
+def test_prompt_flags_risky_practices_stated_as_fact():
+    prompt = service().build_prompt(
+        evidence=[evidence("chunk-1")],
+        evidence_topics={"chunk-1": {"ai_governance"}},
+    )
+
+    assert "RISKY PRACTICES STATED AS FACT" in prompt
+    assert "unless the customer opts out" in prompt
+    # Guardrails against false positives on normal controls.
+    assert "Do not report optional features" in prompt
