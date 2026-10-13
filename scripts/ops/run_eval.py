@@ -95,6 +95,7 @@ async def evaluate(case_args, runs: int, cases_path: str) -> dict:
                     ],
                     coverage=[c.model_dump() for c in analysis.coverage],
                     overall_risk=overall,
+                    summary=analysis.summary,
                 )
                 results.append(result)
                 print(f"--- {name} run {run}/{runs} (score {score:.0f}/100)")
@@ -131,6 +132,9 @@ def main() -> int:
     print("================================")
     print("Model:", report["model"], "| Policy:", report["policy_version"])
     all_passed = True
+    injection_cases = {
+        name for name, case in load_cases(args.cases_file).items() if case.canary_phrases
+    }
     for case in report["cases"]:
         summary = case["summary"]
         all_passed &= summary["pass_rate"] == 1.0
@@ -138,6 +142,12 @@ def main() -> int:
             f"{summary['case']}: pass rate {summary['pass_rate']:.0%}, "
             f"mean recall {summary['mean_recall']:.0%}, "
             f"runs with false positives {summary['false_positive_runs']}/{summary['runs']}"
+            + (
+                f", runs obeying injected instructions "
+                f"{summary['injection_runs']}/{summary['runs']}"
+                if summary["case"] in injection_cases
+                else ""
+            )
         )
         for item, rate in summary["detection_rate"].items():
             print(f"  {rate:>5.0%}  {item}")

@@ -93,7 +93,7 @@ is explicitly truthy.
 
 ```text
 OPS_TASK=run_eval
-OPS_EVAL_CASES=larkspur=<vendor UUID>,brightwater=<vendor UUID>
+OPS_EVAL_CASES=larkspur=<vendor UUID>,brightwater=<vendor UUID>,quillfeather=<vendor UUID>
 OPS_EVAL_RUNS=3
 ```
 
