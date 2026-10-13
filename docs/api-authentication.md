@@ -71,7 +71,8 @@ current stage and message.
 Assessment creation and chat are rate limited per user
 (`ASSESSMENT_RATE_LIMIT_PER_HOUR`, default 20, and `CHAT_RATE_LIMIT_PER_MINUTE`,
 default 20). A request over the limit returns `429` with a `Retry-After` header.
-Limits are kept in memory per app process.
+Limits are stored in the database, so every app instance shares them; a burst
+up to the limit is allowed, then requests refill evenly across the window.
 
 ## Verification and limits
 

@@ -413,7 +413,7 @@ def create_mcp_application(
             await require_vendor(db, vendor_id, access)
             # Shares the per-user chat limit with the HTTP API.
             try:
-                enforce_rate_limit(
+                await enforce_rate_limit(
                     "chat",
                     organization_id=access.tenant.zitadel_org_id,
                     subject=access.member.subject,

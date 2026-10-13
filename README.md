@@ -287,8 +287,11 @@ See [Company and vendor access](docs/company-access.md) for registering companie
 - **Rate limits:** per user and company on Gemini-backed requests.
   `ASSESSMENT_RATE_LIMIT_PER_HOUR` (default 20) covers new assessments;
   `CHAT_RATE_LIMIT_PER_MINUTE` (default 20) covers chat and MCP `ask_vendor`.
-  Over the limit, requests return 429 with `Retry-After`. Counts are kept per
-  process. Requests rejected for authentication or CSRF use no quota.
+  Over the limit, requests return 429 with `Retry-After`. Limits are stored in
+  PostgreSQL and shared by every app instance: a burst up to the limit is allowed,
+  then requests refill evenly across the window (GCRA). If the database is
+  unreachable, each process falls back to its own in-memory count. Requests
+  rejected for authentication or CSRF use no quota.
 - **Prompt-injection guard:** document content is passed to the model as untrusted
   data, with instructions never to follow text found inside evidence.
 - **Container:** the image runs as a non-root user with a pinned `uv` version.
@@ -379,6 +382,7 @@ and `EMBEDDING_MODEL` as the application, otherwise it measures a different mode
 | `assessments`, `findings` | Reports with status, progress, coverage, score, and rated findings with evidence |
 | `chat_conversations`, `chat_messages` | Saved chat conversations and their messages and sources |
 | `audit_events` | Company audit trail |
+| `rate_limit_buckets` | Shared per-user rate-limit state (one row per user and limit) |
 | `llm_usage_events` | Gemini tokens per assessment or chat answer, per company |
 
 Original files stay in the private bucket. Re-processing a document replaces its
@@ -551,6 +555,7 @@ pip compatibility.
 | `ASSESSMENT_WORKER_POLL_SECONDS`, `ASSESSMENT_STALE_MINUTES` | `5`, `15` | Polling; when a stuck run is failed |
 | `EMBEDDING_WORKER_IDLE_MAX_SECONDS`, `ASSESSMENT_WORKER_IDLE_MAX_SECONDS` | `600`, `600` | Longest wait between checks of an empty queue (see below) |
 | `ASSESSMENT_RATE_LIMIT_PER_HOUR`, `CHAT_RATE_LIMIT_PER_MINUTE` | `20`, `20` | Per-user limits (`0` disables) |
+| `RATE_LIMIT_BACKEND` | `database` | `database` shares limits across instances; `memory` keeps them per process |
 
 **Monitoring**
 
@@ -695,7 +700,6 @@ tracing is off unless `SENTRY_TRACES_SAMPLE_RATE` is raised.
 - Severities and score weights are document-based defaults, not calibrated against
   real incidents.
 - Citation checks validate references, not every factual claim in generated text.
-- Rate limits are per process; several replicas each apply their own limit.
 - Companies are registered by an operator; team or group assignments are not implemented.
 
 ## Further documentation

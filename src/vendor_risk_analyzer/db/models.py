@@ -616,3 +616,19 @@ class LlmUsageEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         Index("ix_llm_usage_tenant_created", "tenant_id", "created_at"),
     )
+
+
+class RateLimitBucket(Base):
+    """Shared rate-limit state: one row per user and limit.
+
+    ``tat`` is the GCRA "theoretical arrival time" in Unix seconds. A row
+    whose ``tat`` is in the past is equivalent to no row and may be deleted.
+    """
+
+    __tablename__ = "rate_limit_buckets"
+
+    key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    tat: Mapped[float] = mapped_column(Float, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
