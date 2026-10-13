@@ -32,6 +32,9 @@ Add your Gemini API key and enable `EMBEDDING_WORKER_ENABLED=true` for automatic
 embeddings. Configure embedding and risk model names available to your account.
 Keep the configured embedding dimension at 768 to match the database schema.
 With the worker disabled, ingested documents remain `embedding_pending`.
+Assessments run in a second background worker in the app process
+(`ASSESSMENT_WORKER_ENABLED`, on by default). With it disabled, new assessments
+stay `queued`.
 ZITADEL and Gemini are external services; Compose supplies the app, database and
 storage. There is no authentication bypass in local mode.
 
@@ -63,7 +66,8 @@ All published ports bind to the local machine's loopback interface. Use
 MinIO console with `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` from `.env`.
 The `vendor-documents` bucket is private.
 
-The database initializer enables pgvector, `migrate` applies Alembic migrations,
+The database initializer enables pgvector, `migrate` applies all Alembic migrations
+(including the company, chat history and audit tables),
 and `storage-init` creates the bucket. Their completed exit status is expected.
 The app starts after both jobs succeed. PostgreSQL and storage use named volumes.
 Stop the stack without deleting its data:
