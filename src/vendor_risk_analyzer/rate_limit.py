@@ -140,7 +140,7 @@ async def hit_database(
     """Record one request in PostgreSQL, or raise RateLimitExceeded."""
     if limit <= 0:
         return
-    from sqlalchemy import delete, select
+    from sqlalchemy import select
     from sqlalchemy.exc import IntegrityError
 
     from vendor_risk_analyzer.db.models import RateLimitBucket
@@ -171,16 +171,41 @@ async def hit_database(
                 else:
                     row.tat = new_tat
                     row.updated_at = stamp
-                if random.random() < CLEANUP_PROBABILITY:
-                    await db.execute(
-                        delete(RateLimitBucket).where(RateLimitBucket.tat < now)
-                    )
                 await db.commit()
+                if random.random() < CLEANUP_PROBABILITY:
+                    await delete_idle_buckets(db, now=now)
                 return
         except IntegrityError:
             # Another instance created the row first; lock it and retry.
             if attempt == 1:
                 raise
+
+
+async def delete_idle_buckets(db, *, now: float, batch: int = 500) -> None:
+    """Remove rows whose allowance has fully refilled (same as no row).
+
+    Runs in its own transaction after the request's row lock is released,
+    and skips rows other requests hold, so it can never deadlock with them.
+    Failures are logged; they do not affect the request.
+    """
+    from sqlalchemy import delete, select
+
+    from vendor_risk_analyzer.db.models import RateLimitBucket
+
+    try:
+        idle = (
+            select(RateLimitBucket.key)
+            .where(RateLimitBucket.tat < now)
+            .limit(batch)
+            .with_for_update(skip_locked=True)
+        )
+        await db.execute(
+            delete(RateLimitBucket).where(RateLimitBucket.key.in_(idle.scalar_subquery()))
+        )
+        await db.commit()
+    except Exception:
+        logger.warning("Rate-limit cleanup failed.", exc_info=True)
+        await db.rollback()
 
 
 def bucket_limit(bucket: str) -> tuple[int, float]:

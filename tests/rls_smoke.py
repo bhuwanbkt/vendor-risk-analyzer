@@ -234,9 +234,26 @@ async def main() -> None:
             else:
                 raise AssertionError("Insert into another company was allowed")
 
+        # Binding mid-transaction applies at once, and survives a commit.
+        async with sessions() as db:
+            assert await db.scalar(text("SELECT count(*) FROM vendors")) is not None
+            await tenant_context.bind_tenant(db, COMPANIES["two"]["tenant"])
+            assert (await counts(db))["vendors"] == 1
+            await db.commit()
+            visible = await counts(db)
+            assert all(value == 1 for value in visible.values()), visible
+
         async with system_engine.connect() as connection:
             everything = await counts(connection)
             assert all(value == 2 for value in everything.values()), everything
+
+        # Assessment-job pattern: a system session narrowed to one company.
+        system_sessions = async_sessionmaker(system_engine, expire_on_commit=False)
+        async with system_sessions() as db:
+            assert (await counts(db))["vendors"] == 2
+            await tenant_context.bind_tenant(db, COMPANIES["one"]["tenant"])
+            narrowed = await counts(db)
+            assert all(value == 1 for value in narrowed.values()), narrowed
     finally:
         await engine.dispose()
         await system_engine.dispose()

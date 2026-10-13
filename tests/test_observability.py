@@ -47,6 +47,25 @@ def test_scrub_event_removes_secrets_and_request_content() -> None:
     assert scrubbed["user"] == {"id": "u1"}
 
 
+def test_breadcrumb_urls_lose_their_query_strings() -> None:
+    crumb = {
+        "category": "httplib",
+        "data": {
+            "url": "https://storage.example/bucket/file.pdf?X-Amz-Signature=secret",
+            "http.query": "X-Amz-Signature=secret",
+            "method": "GET",
+        },
+    }
+    event = {"breadcrumbs": {"values": [dict(crumb, data=dict(crumb["data"]))]}}
+
+    assert observability.scrub_breadcrumb(crumb)["data"] == {
+        "url": "https://storage.example/bucket/file.pdf",
+        "method": "GET",
+    }
+    scrubbed = observability.scrub_event(event)["breadcrumbs"]["values"][0]
+    assert "secret" not in str(scrubbed)
+
+
 def test_invalid_trace_sample_rate_is_rejected() -> None:
     with pytest.raises(ValueError, match="between 0 and 1"):
         observability._sample_rate("2")

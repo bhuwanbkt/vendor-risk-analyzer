@@ -12,7 +12,13 @@ everything that could contain them out of Sentry:
 - no local variables in stack traces (they can hold document text)
 - the Google GenAI integration is disabled, so prompts and model answers
   are never attached
+- database engines hide bound parameters, so SQL errors in events and logs
+  never contain row values (see ``db/session.py``)
+- breadcrumbs keep no URL query strings (presigned storage URLs carry
+  signatures there)
 - performance tracing is off by default (free plans have small quotas)
+
+Requires ``sentry-sdk>=2.42`` (the first version with the GenAI integration).
 """
 
 from __future__ import annotations
@@ -54,7 +60,23 @@ def scrub_event(event: dict[str, Any], hint: dict[str, Any] | None = None):
     user = event.get("user")
     if isinstance(user, dict):
         user.pop("ip_address", None)
+    breadcrumbs = event.get("breadcrumbs")
+    values = breadcrumbs.get("values") if isinstance(breadcrumbs, dict) else breadcrumbs
+    for crumb in values or []:
+        scrub_breadcrumb(crumb)
     return event
+
+
+def scrub_breadcrumb(crumb: dict[str, Any], hint: dict[str, Any] | None = None):
+    """Drop URL query strings, which can carry signatures or identifiers."""
+    data = crumb.get("data") if isinstance(crumb, dict) else None
+    if isinstance(data, dict):
+        for key in ("http.query", "http.fragment"):
+            data.pop(key, None)
+        url = data.get("url")
+        if isinstance(url, str) and "?" in url:
+            data["url"] = url.split("?", 1)[0]
+    return crumb
 
 
 def _sample_rate(raw: str | None) -> float:
@@ -74,13 +96,21 @@ def init_error_tracking() -> bool:
 
     try:
         import sentry_sdk
-        from sentry_sdk.integrations.google_genai import GoogleGenAIIntegration
     except ImportError:
         logger.warning(
             "SENTRY_DSN is set but sentry-sdk is not installed; "
             "error tracking is disabled."
         )
         return False
+
+    disabled = []
+    try:
+        from sentry_sdk.integrations.google_genai import GoogleGenAIIntegration
+
+        disabled.append(GoogleGenAIIntegration)
+    except Exception:
+        # Older SDKs have no GenAI integration, so it cannot attach prompts.
+        pass
 
     sentry_sdk.init(
         dsn=dsn,
@@ -91,8 +121,9 @@ def init_error_tracking() -> bool:
         include_local_variables=False,
         max_request_body_size="never",
         traces_sample_rate=_sample_rate(os.getenv("SENTRY_TRACES_SAMPLE_RATE")),
-        disabled_integrations=[GoogleGenAIIntegration],
+        disabled_integrations=disabled,
         before_send=scrub_event,
+        before_breadcrumb=scrub_breadcrumb,
     )
     logger.info("Sentry error tracking enabled.")
     return True

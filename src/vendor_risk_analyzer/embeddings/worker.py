@@ -566,6 +566,7 @@ async def run_embedding_worker() -> None:
         get_database_url(),
         poolclass=NullPool,
         pool_pre_ping=True,
+        hide_parameters=True,
     )
     # Embedding works on queued documents of every company.
     enable_system_access(engine)

@@ -30,19 +30,11 @@ def gemini_reply(text: str, prompt_tokens: int, output_tokens: int) -> httpx.Res
     )
 
 
-def test_chat_records_tokens_for_every_model_call(security_api, monkeypatch):
+def use_real_chat_service(security_api, monkeypatch, replies):
     from vendor_risk_analyzer.api import chat
     from vendor_risk_analyzer.chat import service as chat_service_module
 
-    security_api.authenticate(["analyst"])
-    vendor_id = security_api.ids["vendor_a"]
-    replies = iter(
-        [
-            # Rejected: no citation. Its tokens still count.
-            gemini_reply("An uncited answer.", 900, 40),
-            gemini_reply("Customers are notified [S1].", 950, 60),
-        ]
-    )
+    replies = iter(replies)
     transport = httpx.MockTransport(lambda request: next(replies))
     real_client = httpx.AsyncClient
 
@@ -70,11 +62,33 @@ def test_chat_records_tokens_for_every_model_call(security_api, monkeypatch):
         ),
     )
 
-    response = security_api.client.post(
+
+def ask(security_api, **extra):
+    return security_api.client.post(
         "/api/chat",
-        json={"vendor_id": vendor_id, "question": "Are customers notified?"},
+        json={
+            "vendor_id": security_api.ids["vendor_a"],
+            "question": "Are customers notified?",
+            **extra,
+        },
         headers={"X-CSRF-Token": "test-csrf-token"},
     )
+
+
+def test_chat_records_tokens_for_every_model_call(security_api, monkeypatch):
+    security_api.authenticate(["analyst"])
+    vendor_id = security_api.ids["vendor_a"]
+    use_real_chat_service(
+        security_api,
+        monkeypatch,
+        [
+            # Rejected: no citation. Its tokens still count.
+            gemini_reply("An uncited answer.", 900, 40),
+            gemini_reply("Customers are notified [S1].", 950, 60),
+        ],
+    )
+
+    response = ask(security_api)
 
     assert response.status_code == 200
     (event,) = security_api.usage_events
@@ -84,6 +98,51 @@ def test_chat_records_tokens_for_every_model_call(security_api, monkeypatch):
     assert event.actor_subject == "test-user"
     assert (event.requests, event.input_tokens, event.output_tokens) == (2, 1850, 100)
     assert event.total_tokens == 1950
+    # A new conversation is referenced once it has been saved.
+    assert event.reference_id == response.json()["conversation_id"]
+
+
+def test_answer_survives_history_save_failure_and_usage_is_recorded(
+    security_api, monkeypatch
+):
+    from vendor_risk_analyzer.api import chat
+
+    security_api.authenticate(["analyst"])
+    use_real_chat_service(
+        security_api, monkeypatch, [gemini_reply("Customers are notified [S1].", 500, 50)]
+    )
+
+    async def broken_save(*args, **kwargs):
+        raise RuntimeError("database write failed")
+
+    monkeypatch.setattr(chat, "save_exchange", broken_save)
+
+    response = ask(security_api)
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "Customers are notified [S1]."
+    (event,) = security_api.usage_events
+    assert event.tenant_id == security_api.tenant.id
+    assert event.actor_subject == "test-user"
+
+
+def test_usage_recording_failure_never_changes_the_response(security_api, monkeypatch):
+    from vendor_risk_analyzer.usage import service as usage_service
+
+    security_api.authenticate(["analyst"])
+    use_real_chat_service(
+        security_api, monkeypatch, [gemini_reply("Customers are notified [S1].", 500, 50)]
+    )
+
+    async def broken_record(**kwargs):
+        raise RuntimeError("usage table missing")
+
+    monkeypatch.setattr(usage_service, "record_usage", broken_record)
+
+    response = ask(security_api)
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "Customers are notified [S1]."
 
 
 def test_rejected_chat_request_records_no_usage(security_api):

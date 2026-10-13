@@ -50,6 +50,9 @@ engine = create_async_engine(
     max_overflow=settings.database_max_overflow,
     pool_pre_ping=True,
     pool_recycle=300,
+    # Keep row values (document text, chat questions) out of SQL error
+    # messages, logs, and error tracking.
+    hide_parameters=True,
 )
 
 

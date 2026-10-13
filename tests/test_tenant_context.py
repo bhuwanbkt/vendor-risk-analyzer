@@ -162,6 +162,13 @@ def test_migration_covers_every_company_owned_table() -> None:
     unprotected = {"tenants", "rate_limit_buckets"}
     assert set(migration.OWNERSHIP) == set(Base.metadata.tables) - unprotected
     for table, condition in migration.OWNERSHIP.items():
-        sql = migration.policy_sql(table, condition)
-        assert "app_rls_bypass() OR" in sql
-        assert "USING" in sql and "WITH CHECK" in sql
+        statements = migration.policy_statements(table, condition)
+        assert "app_rls_bypass() OR" in statements[-1]
+        assert "USING" in statements[-1] and "WITH CHECK" in statements[-1]
+    # asyncpg prepares each statement: exactly one command per execute.
+    for statement in migration.FUNCTIONS + [
+        s
+        for table, condition in migration.OWNERSHIP.items()
+        for s in migration.policy_statements(table, condition)
+    ]:
+        assert ";" not in statement, statement

@@ -95,3 +95,41 @@ def test_long_keys_are_hashed_to_fit_the_column():
     assert bucket_key("chat:org:user") == "chat:org:user"
     hashed = bucket_key("x" * 400)
     assert hashed.startswith("sha256:") and len(hashed) <= 255
+
+
+def test_idle_bucket_cleanup_keeps_active_rows():
+    import asyncio
+
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session
+
+    from vendor_risk_analyzer.db.models import RateLimitBucket
+    from vendor_risk_analyzer.rate_limit import delete_idle_buckets
+
+    engine = create_engine("sqlite://")
+    RateLimitBucket.__table__.create(engine)
+    session = Session(engine)
+    from datetime import datetime, timezone
+
+    stamp = datetime.now(timezone.utc)
+    session.add_all(
+        [
+            RateLimitBucket(key="idle", tat=50.0, updated_at=stamp),
+            RateLimitBucket(key="active", tat=150.0, updated_at=stamp),
+        ]
+    )
+    session.commit()
+
+    class Async:
+        async def execute(self, statement):
+            return session.execute(statement)
+
+        async def commit(self):
+            session.commit()
+
+        async def rollback(self):
+            session.rollback()
+
+    asyncio.run(delete_idle_buckets(Async(), now=100.0))
+
+    assert session.scalars(select(RateLimitBucket.key)).all() == ["active"]

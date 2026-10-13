@@ -449,6 +449,7 @@ async def run_assessment_worker() -> None:
         get_database_url(),
         poolclass=NullPool,
         pool_pre_ping=True,
+        hide_parameters=True,
     )
     # Claims and status updates span every company; each job's analysis
     # is narrowed to its vendor's company (see run_assessment_job).

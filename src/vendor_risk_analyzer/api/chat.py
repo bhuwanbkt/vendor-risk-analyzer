@@ -99,6 +99,11 @@ async def vendor_chat(
     from the application context.
     """
     access = await require_vendor_access(db, user, payload.vendor_id)
+    # Plain values: a rollback below expires ORM objects, and reading them
+    # afterwards would need a lazy load.
+    tenant_id = access.tenant.id
+    member_subject = access.member.subject
+    usage_reference = payload.conversation_id
 
     # Content is never logged; only that a question was asked.
     await audit(
@@ -188,6 +193,7 @@ async def vendor_chat(
             await db.rollback()
             return response
 
+        usage_reference = conversation_id
         return response.model_copy(
             update={"conversation_id": conversation_id}
         )
@@ -240,9 +246,10 @@ async def vendor_chat(
         await embedding_service.close()
         await record_chat_usage(
             chat_service,
-            access,
+            tenant_id=tenant_id,
+            actor_subject=member_subject,
             vendor_id=payload.vendor_id,
-            reference_id=payload.conversation_id,
+            reference_id=usage_reference,
             feature="chat",
         )
 

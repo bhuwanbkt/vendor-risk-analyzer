@@ -85,21 +85,34 @@ async def record_usage(
 
 
 async def record_chat_usage(
-    chat_service, access, *, vendor_id, reference_id, feature: str
+    chat_service,
+    *,
+    tenant_id: UUID,
+    actor_subject: str | None,
+    vendor_id,
+    reference_id,
+    feature: str,
 ) -> None:
-    """Record tokens spent on a chat answer, including rejected ones."""
-    usage = getattr(chat_service, "token_usage", None)
-    if not isinstance(usage, TokenUsage):
-        return
-    await record_usage(
-        tenant_id=access.tenant.id,
-        vendor_id=vendor_id,
-        feature=feature,
-        model=getattr(chat_service, "model", "unknown"),
-        usage=usage,
-        reference_id=reference_id,
-        actor_subject=access.member.subject,
-    )
+    """Record tokens spent on a chat answer, including rejected ones.
+
+    Called from ``finally`` blocks, so it never raises: losing a usage row
+    must not turn an answer (or the original error) into a different error.
+    """
+    try:
+        usage = getattr(chat_service, "token_usage", None)
+        if not isinstance(usage, TokenUsage):
+            return
+        await record_usage(
+            tenant_id=tenant_id,
+            vendor_id=vendor_id,
+            feature=feature,
+            model=getattr(chat_service, "model", "unknown"),
+            usage=usage,
+            reference_id=reference_id,
+            actor_subject=actor_subject,
+        )
+    except Exception:
+        logger.exception("Chat usage could not be recorded. feature=%s", feature)
 
 
 def _price(name: str) -> float | None:

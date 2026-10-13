@@ -136,7 +136,8 @@ async def rls_status(db) -> dict:
                 SELECT current_user,
                        r.rolsuper,
                        r.rolbypassrls,
-                       c.relowner = r.oid AS owns_tables,
+                       -- Members of the owning role are exempt too.
+                       pg_has_role(current_user, c.relowner, 'USAGE') AS owns_tables,
                        c.relrowsecurity
                 FROM pg_roles r, pg_class c
                 WHERE r.rolname = current_user
@@ -156,5 +157,5 @@ async def rls_status(db) -> dict:
     elif bypassrls:
         reason = f"Role {role} has BYPASSRLS."
     elif owns_tables:
-        reason = f"Role {role} owns the tables."
+        reason = f"Role {role} owns the tables (or is a member of their owner)."
     return {"enforced": reason is None, "role": role, "reason": reason}

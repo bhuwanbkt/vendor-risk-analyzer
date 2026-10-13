@@ -22,17 +22,22 @@ branch_labels = None
 depends_on = None
 
 
-FUNCTIONS = """
-CREATE OR REPLACE FUNCTION app_current_tenant() RETURNS uuid
-LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    SELECT NULLIF(current_setting('app.tenant_id', true), '')::uuid
-$$;
-
-CREATE OR REPLACE FUNCTION app_rls_bypass() RETURNS boolean
-LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    SELECT coalesce(current_setting('app.rls_bypass', true), '') = 'on'
-$$;
-"""
+# One statement per op.execute: asyncpg prepares each statement, and
+# PostgreSQL rejects several commands in one prepared statement.
+FUNCTIONS = [
+    """
+    CREATE OR REPLACE FUNCTION app_current_tenant() RETURNS uuid
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+        SELECT NULLIF(current_setting('app.tenant_id', true), '')::uuid
+    $$
+    """,
+    """
+    CREATE OR REPLACE FUNCTION app_rls_bypass() RETURNS boolean
+    LANGUAGE sql STABLE PARALLEL SAFE AS $$
+        SELECT coalesce(current_setting('app.rls_bypass', true), '') = 'on'
+    $$
+    """,
+]
 
 # Table -> condition that a row belongs to the current company.
 OWNERSHIP = {
@@ -75,25 +80,27 @@ OWNERSHIP = {
 POLICY = "company_isolation"
 
 
-def policy_sql(table: str, condition: str) -> str:
+def policy_statements(table: str, condition: str) -> list[str]:
     rule = f"app_rls_bypass() OR ({condition})"
-    return (
-        f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;\n"
-        f"DROP POLICY IF EXISTS {POLICY} ON {table};\n"
+    return [
+        f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY",
+        f"DROP POLICY IF EXISTS {POLICY} ON {table}",
         f"CREATE POLICY {POLICY} ON {table} FOR ALL "
-        f"USING ({rule}) WITH CHECK ({rule});"
-    )
+        f"USING ({rule}) WITH CHECK ({rule})",
+    ]
 
 
 def upgrade():
-    op.execute(FUNCTIONS)
+    for statement in FUNCTIONS:
+        op.execute(statement)
     for table, condition in OWNERSHIP.items():
-        op.execute(policy_sql(table, condition))
+        for statement in policy_statements(table, condition):
+            op.execute(statement)
 
 
 def downgrade():
     for table in OWNERSHIP:
-        op.execute(f"DROP POLICY IF EXISTS {POLICY} ON {table};")
-        op.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY;")
-    op.execute("DROP FUNCTION IF EXISTS app_rls_bypass();")
-    op.execute("DROP FUNCTION IF EXISTS app_current_tenant();")
+        op.execute(f"DROP POLICY IF EXISTS {POLICY} ON {table}")
+        op.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
+    op.execute("DROP FUNCTION IF EXISTS app_rls_bypass()")
+    op.execute("DROP FUNCTION IF EXISTS app_current_tenant()")

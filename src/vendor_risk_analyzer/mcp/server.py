@@ -454,7 +454,8 @@ def create_mcp_application(
                     await embedding.close()
                 await record_chat_usage(
                     service,
-                    access,
+                    tenant_id=access.tenant.id,
+                    actor_subject=access.member.subject,
                     vendor_id=vendor_id,
                     reference_id=None,
                     feature="mcp_chat",
