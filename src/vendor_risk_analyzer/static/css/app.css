@@ -2025,6 +2025,11 @@ textarea {
 }
 
 
+.status-dot.amber {
+    background: var(--amber);
+}
+
+
 .system-card strong,
 .system-card p {
     display: block;

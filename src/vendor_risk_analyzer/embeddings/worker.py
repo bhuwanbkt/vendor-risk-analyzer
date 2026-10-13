@@ -20,6 +20,7 @@ from vendor_risk_analyzer.embeddings.repository import (
     update_document_status,
     verify_embedding,
 )
+from vendor_risk_analyzer.db.tenant_context import enable_system_access
 from vendor_risk_analyzer.db.url import (
     get_database_url,
 )
@@ -566,6 +567,8 @@ async def run_embedding_worker() -> None:
         poolclass=NullPool,
         pool_pre_ping=True,
     )
+    # Embedding works on queued documents of every company.
+    enable_system_access(engine)
 
     embedding_service = None
 

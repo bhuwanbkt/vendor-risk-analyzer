@@ -34,6 +34,7 @@ from vendor_risk_analyzer.assessments.service import (
 )
 from vendor_risk_analyzer.audit.service import record_event
 from vendor_risk_analyzer.db.models import Assessment, Vendor
+from vendor_risk_analyzer.db.tenant_context import bind_tenant, enable_system_access
 from vendor_risk_analyzer.db.url import get_database_url
 from vendor_risk_analyzer.usage.service import record_usage
 from vendor_risk_analyzer.usage.tokens import TokenUsage
@@ -290,6 +291,14 @@ async def record_job_usage(session_factory, assessment_id: UUID, risk_service) -
         logger.exception("Could not record usage for assessment %s", assessment_id)
 
 
+async def bind_vendor_company(db, vendor_id) -> None:
+    if not hasattr(db, "scalar"):
+        return  # test double
+    tenant_id = await db.scalar(select(Vendor.tenant_id).where(Vendor.id == vendor_id))
+    if tenant_id is not None:
+        await bind_tenant(db, tenant_id)
+
+
 async def run_assessment_job(session_factory, assessment_id: UUID) -> str:
     """Run one claimed assessment to completion. Returns the final status."""
 
@@ -306,6 +315,9 @@ async def run_assessment_job(session_factory, assessment_id: UUID) -> str:
             if assessment is None:
                 return "missing"
             vendor_id = str(assessment.vendor_id)
+            # Row-level security: retrieval, saving and scoring for this job
+            # can only see the vendor's own company.
+            await bind_vendor_company(db, assessment.vendor_id)
 
             embedding_service = EmbeddingService()
             risk_service = RiskAnalysisService(
@@ -438,6 +450,9 @@ async def run_assessment_worker() -> None:
         poolclass=NullPool,
         pool_pre_ping=True,
     )
+    # Claims and status updates span every company; each job's analysis
+    # is narrowed to its vendor's company (see run_assessment_job).
+    enable_system_access(engine)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     next_recovery_at = time.monotonic()
 

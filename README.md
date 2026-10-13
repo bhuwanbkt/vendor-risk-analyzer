@@ -270,6 +270,12 @@ New users follow the company default. Every page, API endpoint, export, and MCP
 tool enforces the same company and vendor rules. Unknown, foreign, and unassigned
 IDs all return the same not-found response.
 
+PostgreSQL row-level security adds a second layer: once a request knows the
+caller's company, every transaction is limited to that company's rows, so a query
+that forgot its company filter returns nothing instead of another company's data.
+It applies when the app connects with its own restricted database role; see
+[Row-level security](docs/row-level-security.md).
+
 Browser sign-in uses Authorization Code with PKCE. The app validates the ID token
 and the matching UserInfo subject before creating a signed session. Provider tokens
 are never stored in the session. Cookie-authenticated writes require a CSRF token;
@@ -292,8 +298,12 @@ See [Company and vendor access](docs/company-access.md) for registering companie
   then requests refill evenly across the window (GCRA). If the database is
   unreachable, each process falls back to its own in-memory count. Requests
   rejected for authentication or CSRF use no quota.
+- **Row-level security:** company-owned tables have PostgreSQL policies keyed on a
+  transaction-local company setting; the System page shows whether they are
+  enforced for the app's database role.
 - **Prompt-injection guard:** document content is passed to the model as untrusted
-  data, with instructions never to follow text found inside evidence.
+  data, with instructions never to follow text found inside evidence. The
+  evaluation includes a vendor whose documents try to override those instructions.
 - **Container:** the image runs as a non-root user with a pinned `uv` version.
 - **API docs:** public Swagger, ReDoc, and OpenAPI endpoints are disabled.
 
@@ -417,7 +427,7 @@ elements and chunks, and the embedding worker re-embeds them.
 | [src/vendor_risk_analyzer/usage/](src/vendor_risk_analyzer/usage/) | Gemini token counts, usage recording, and cost estimates |
 | [src/vendor_risk_analyzer/evaluation/](src/vendor_risk_analyzer/evaluation/) | Evaluation cases and scoring |
 | [src/vendor_risk_analyzer/mcp/](src/vendor_risk_analyzer/mcp/) | Authenticated Streamable HTTP MCP tools |
-| [src/vendor_risk_analyzer/db/](src/vendor_risk_analyzer/db/), [storage/](src/vendor_risk_analyzer/storage/) | SQLAlchemy models and sessions; private object storage |
+| [src/vendor_risk_analyzer/db/](src/vendor_risk_analyzer/db/), [storage/](src/vendor_risk_analyzer/storage/) | SQLAlchemy models, sessions, and row-level security context; private object storage |
 | `security_headers.py`, `rate_limit.py`, `config.py` | Response headers, rate limiting, validated settings |
 | [src/vendor_risk_analyzer/web/](src/vendor_risk_analyzer/web/), [templates/](src/vendor_risk_analyzer/templates/), [static/](src/vendor_risk_analyzer/static/) | Browser pages, navigation, templates, CSS, and JavaScript |
 | [migrations/](migrations/) | Alembic migrations |
@@ -715,6 +725,8 @@ tracing is off unless `SENTRY_TRACES_SAMPLE_RATE` is raised.
   real incidents.
 - Citation checks validate references, not every factual claim in generated text.
 - Companies are registered by an operator; team or group assignments are not implemented.
+- Row-level security guards against forgotten company filters, not against
+  arbitrary SQL: the app's role can enable the bypass that background workers use.
 
 ## Further documentation
 
@@ -724,4 +736,5 @@ tracing is off unless `SENTRY_TRACES_SAMPLE_RATE` is raised.
 - [MCP tools and client setup](docs/mcp.md)
 - [Operational scripts](scripts/README.md)
 - [Operations runbooks: migration rehearsal and restore drill](docs/operations.md)
+- [Row-level security and the app database role](docs/row-level-security.md)
 - [Security tests and their limits](tests/security/README.md)

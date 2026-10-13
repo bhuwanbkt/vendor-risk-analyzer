@@ -10,6 +10,9 @@ from collections.abc import AsyncGenerator
 
 from vendor_risk_analyzer.config import get_settings
 
+# Registers the row-level security listener on every ORM session.
+from vendor_risk_analyzer.db import tenant_context  # noqa: F401
+
 
 settings = get_settings()
 

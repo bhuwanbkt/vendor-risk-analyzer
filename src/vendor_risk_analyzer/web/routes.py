@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import (
 from vendor_risk_analyzer.audit.service import ACTION_LABELS, list_events
 from vendor_risk_analyzer.embeddings.worker import worker_status
 from vendor_risk_analyzer.usage.service import summarize_usage
+from vendor_risk_analyzer.db.tenant_context import rls_status
 from vendor_risk_analyzer.auth.dependencies import get_current_user, get_user_roles
 from vendor_risk_analyzer.auth.access import resolve_access
 from vendor_risk_analyzer.db.models import Tenant
@@ -947,6 +948,13 @@ async def system_page(
         await db.rollback()
         usage_summary = None
 
+    try:
+        row_security = await rls_status(db)
+    except Exception:
+        logger.exception("Row-level security status unavailable.")
+        await db.rollback()
+        row_security = {"enforced": False, "role": None, "reason": "Status unavailable."}
+
 
     return templates.TemplateResponse(
         request=request,
@@ -960,6 +968,7 @@ async def system_page(
             page_title="System",
             system_info=system_info,
             usage_summary=usage_summary,
+            row_security=row_security,
         ),
     )
 

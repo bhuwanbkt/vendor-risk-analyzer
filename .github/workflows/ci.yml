@@ -90,6 +90,7 @@ jobs:
           docker compose --env-file .env run --rm -T --no-deps -v "$PWD/tests/tenant_migration_smoke.py:/app/tests/tenant_migration_smoke.py:ro" migrate python tests/tenant_migration_smoke.py --seed
           docker compose --env-file .env run --rm -T --no-deps migrate
           docker compose --env-file .env run --rm -T --no-deps -v "$PWD/tests/tenant_migration_smoke.py:/app/tests/tenant_migration_smoke.py:ro" migrate python tests/tenant_migration_smoke.py
+          docker compose --env-file .env run --rm -T --no-deps -v "$PWD/tests/rls_smoke.py:/app/tests/rls_smoke.py:ro" migrate python tests/rls_smoke.py
           docker compose --env-file .env up --detach --wait --wait-timeout 180
           docker compose --env-file .env exec -T app python scripts/ops/register_tenant.py --org-id compose-smoke-org --name "Compose smoke" --legacy --write
       - name: Exercise PostgreSQL and private object storage

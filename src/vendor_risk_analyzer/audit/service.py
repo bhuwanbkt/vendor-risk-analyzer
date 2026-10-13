@@ -13,6 +13,7 @@ from typing import Any
 from uuid import UUID
 
 from vendor_risk_analyzer.db.models import AuditEvent
+from vendor_risk_analyzer.db.tenant_context import bind_system, bind_tenant
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -54,6 +55,10 @@ async def record_event(
 ) -> None:
     try:
         async with (factory or session_factory)() as db:
+            if tenant_id is not None:
+                await bind_tenant(db, tenant_id)
+            else:
+                await bind_system(db)
             db.add(
                 AuditEvent(
                     tenant_id=tenant_id,

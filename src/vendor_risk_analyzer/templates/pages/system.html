@@ -106,6 +106,30 @@
 
     </article>
 
+
+    <article class="system-card">
+
+        <span class="status-dot {{ 'green' if row_security.enforced else 'amber' }}">
+        </span>
+
+        <div>
+
+            <strong>
+                Row-level security
+            </strong>
+
+            <p>
+                {% if row_security.enforced %}
+                Enforced for role {{ row_security.role }}
+                {% else %}
+                Not enforced: {{ row_security.reason }}
+                {% endif %}
+            </p>
+
+        </div>
+
+    </article>
+
 </section>
 
 

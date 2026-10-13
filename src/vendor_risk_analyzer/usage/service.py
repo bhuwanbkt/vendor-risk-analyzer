@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from vendor_risk_analyzer.db.models import LlmUsageEvent
+from vendor_risk_analyzer.db.tenant_context import bind_system, bind_tenant
 from vendor_risk_analyzer.usage.tokens import TokenUsage
 
 logger = logging.getLogger("uvicorn.error")
@@ -55,6 +56,10 @@ async def record_usage(
         return
     try:
         async with (factory or session_factory)() as db:
+            if tenant_id is not None:
+                await bind_tenant(db, tenant_id)
+            else:
+                await bind_system(db)
             db.add(
                 LlmUsageEvent(
                     tenant_id=tenant_id,

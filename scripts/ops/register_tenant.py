@@ -9,12 +9,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from vendor_risk_analyzer.auth.tenant_registration import register_tenant
+from vendor_risk_analyzer.db.tenant_context import enable_system_access
 from vendor_risk_analyzer.db.url import get_database_url
 
 
 async def run(args):
     load_dotenv()
     engine = create_async_engine(get_database_url())
+    enable_system_access(engine)  # registration spans companies
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as db:
             tenant = await register_tenant(
