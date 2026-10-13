@@ -639,9 +639,11 @@ Check the applied revision with `SELECT version_num FROM alembic_version;`. See
 ## Limitations
 
 - ZITADEL and Gemini are required; the full application cannot run offline.
-- Model output varies between runs. Risk scores for the same vendor can differ by
-  roughly 10 points, and rare findings may not appear in every run. Use the quality
-  evaluation's detection rates rather than single runs to judge changes.
+- The model is not fully deterministic. On the evaluation fixtures, findings and
+  scores have been identical across repeated runs, but real vendor documents,
+  model updates, or prompt changes can still produce different findings and scores
+  between runs. Use the quality evaluation's detection rates rather than single
+  runs to judge changes.
 - Severities and score weights are document-based defaults, not calibrated against
   real incidents.
 - Citation checks validate references, not every factual claim in generated text.
