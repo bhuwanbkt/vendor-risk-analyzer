@@ -589,3 +589,30 @@ class ChatMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         CheckConstraint("role IN ('user', 'assistant')", name="ck_chat_message_role"),
     )
+
+
+class LlmUsageEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Gemini tokens spent by one assessment or chat answer, per company.
+
+    vendor_id is not a foreign key so usage history outlives deleted vendors.
+    """
+
+    __tablename__ = "llm_usage_events"
+
+    tenant_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True
+    )
+    vendor_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    feature: Mapped[str] = mapped_column(String(32), nullable=False)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    reference_id: Mapped[str | None] = mapped_column(String(64))
+    actor_subject: Mapped[str | None] = mapped_column(String(255))
+    requests: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    thought_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    __table_args__ = (
+        Index("ix_llm_usage_tenant_created", "tenant_id", "created_at"),
+    )

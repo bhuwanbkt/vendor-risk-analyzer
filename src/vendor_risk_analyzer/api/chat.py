@@ -14,6 +14,7 @@ from vendor_risk_analyzer.chat.history import (
 )
 from vendor_risk_analyzer.chat.schemas import ConversationDetail, ConversationSummary
 from vendor_risk_analyzer.audit.service import record as audit
+from vendor_risk_analyzer.usage.service import record_chat_usage
 from vendor_risk_analyzer.rate_limit import rate_limit
 from vendor_risk_analyzer.auth.access import require_vendor_access
 
@@ -140,6 +141,7 @@ async def vendor_chat(
     embedding_service = (
         EmbeddingService()
     )
+    chat_service = None
 
 
     try:
@@ -236,6 +238,13 @@ async def vendor_chat(
 
     finally:
         await embedding_service.close()
+        await record_chat_usage(
+            chat_service,
+            access,
+            vendor_id=payload.vendor_id,
+            reference_id=payload.conversation_id,
+            feature="chat",
+        )
 
 
 # ============================================================

@@ -23,6 +23,7 @@ Model Context Protocol (MCP) server share the same services and access rules.
 - [Companies, roles, and access](#companies-roles-and-access)
 - [Security controls](#security-controls)
 - [Audit trail](#audit-trail)
+- [AI usage](#ai-usage)
 - [Quality evaluation](#quality-evaluation)
 - [Data model](#data-model)
 - [Project structure](#project-structure)
@@ -59,6 +60,8 @@ Model Context Protocol (MCP) server share the same services and access rules.
 - Multi-company access mapped to ZITADEL organizations, with Viewer, Analyst, and Admin roles
 - Per-user vendor assignments managed by company admins
 - Company audit log, security headers, and per-user rate limits on Gemini usage
+- Gemini token usage per company on the admin System page, with optional cost estimates
+- Optional Sentry error tracking with vendor content kept out
 - Optional JWT bearer access for API clients and six authenticated MCP tools
 - A repeatable quality evaluation with labelled fixture vendors
 
@@ -308,6 +311,21 @@ Events are written after the action succeeds, on their own short database sessio
 A failed audit write is logged but never blocks the user. Events are kept
 indefinitely.
 
+## AI usage
+
+Every assessment and chat answer records the Gemini tokens it used (input,
+output, and thinking tokens, and the number of model calls) in
+`llm_usage_events`. Tokens are counted even when an answer is later rejected,
+for example an assessment that fails grounding or a chat reply retried for
+missing citations, because they were still spent. A completed assessment also
+stores its usage in the report metadata (`llm_usage`).
+
+Admins see the last 30 days for their company on the **System** page, by
+feature and model. Gemini's free tier is not billed, so only token counts are
+shown unless `LLM_INPUT_PRICE_PER_MILLION_TOKENS` and
+`LLM_OUTPUT_PRICE_PER_MILLION_TOKENS` are set; then an estimated cost at those
+rates is added. Embedding calls are not counted.
+
 ## Quality evaluation
 
 `evals/fixtures/` contains documents for two fictional vendors with planted issues:
@@ -361,6 +379,7 @@ and `EMBEDDING_MODEL` as the application, otherwise it measures a different mode
 | `assessments`, `findings` | Reports with status, progress, coverage, score, and rated findings with evidence |
 | `chat_conversations`, `chat_messages` | Saved chat conversations and their messages and sources |
 | `audit_events` | Company audit trail |
+| `llm_usage_events` | Gemini tokens per assessment or chat answer, per company |
 
 Original files stay in the private bucket. Re-processing a document replaces its
 elements and chunks, and the embedding worker re-embeds them.
@@ -379,6 +398,7 @@ elements and chunks, and the embedding worker re-embeds them.
 | [src/vendor_risk_analyzer/assessments/](src/vendor_risk_analyzer/assessments/) | Assessment persistence, background worker, report export |
 | [src/vendor_risk_analyzer/chat/](src/vendor_risk_analyzer/chat/) | Grounded chat and saved conversations |
 | [src/vendor_risk_analyzer/audit/](src/vendor_risk_analyzer/audit/) | Audit event recording and listing |
+| [src/vendor_risk_analyzer/usage/](src/vendor_risk_analyzer/usage/) | Gemini token counts, usage recording, and cost estimates |
 | [src/vendor_risk_analyzer/evaluation/](src/vendor_risk_analyzer/evaluation/) | Evaluation cases and scoring |
 | [src/vendor_risk_analyzer/mcp/](src/vendor_risk_analyzer/mcp/) | Authenticated Streamable HTTP MCP tools |
 | [src/vendor_risk_analyzer/db/](src/vendor_risk_analyzer/db/), [storage/](src/vendor_risk_analyzer/storage/) | SQLAlchemy models and sessions; private object storage |
@@ -539,6 +559,7 @@ pip compatibility.
 | `SENTRY_DSN` | — | Turn on Sentry error tracking (off when unset) |
 | `SENTRY_ENVIRONMENT` | `APP_ENV` | Environment name shown in Sentry |
 | `SENTRY_TRACES_SAMPLE_RATE` | `0` | Share of requests traced for performance (0–1) |
+| `LLM_INPUT_PRICE_PER_MILLION_TOKENS`, `LLM_OUTPUT_PRICE_PER_MILLION_TOKENS` | — | USD prices for the System page's cost estimate (both required; thinking tokens count as output) |
 
 Keep `RISK_LLM_MODEL` and `EMBEDDING_MODEL` identical on the application and on
 any job that runs analysis or evaluation.

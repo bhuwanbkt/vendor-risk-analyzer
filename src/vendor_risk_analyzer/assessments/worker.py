@@ -35,6 +35,8 @@ from vendor_risk_analyzer.assessments.service import (
 from vendor_risk_analyzer.audit.service import record_event
 from vendor_risk_analyzer.db.models import Assessment, Vendor
 from vendor_risk_analyzer.db.url import get_database_url
+from vendor_risk_analyzer.usage.service import record_usage
+from vendor_risk_analyzer.usage.tokens import TokenUsage
 from vendor_risk_analyzer.idle_backoff import (
     IdleBackoff,
     idle_max_seconds,
@@ -257,6 +259,37 @@ async def audit_job(
         logger.exception("Could not audit assessment %s", assessment_id)
 
 
+async def record_job_usage(session_factory, assessment_id: UUID, risk_service) -> None:
+    """Record the Gemini tokens an assessment used, even if it failed."""
+    usage = getattr(risk_service, "token_usage", None)
+    if not isinstance(usage, TokenUsage) or usage.requests == 0:
+        return
+    try:
+        async with session_factory() as db:
+            row = (
+                await db.execute(
+                    select(Assessment.vendor_id, Assessment.extra_data, Vendor.tenant_id)
+                    .join(Vendor, Vendor.id == Assessment.vendor_id)
+                    .where(Assessment.id == assessment_id)
+                )
+            ).first()
+        if row is None:
+            return
+        vendor_id, metadata, tenant_id = row
+        await record_usage(
+            tenant_id=tenant_id,
+            vendor_id=vendor_id,
+            feature="assessment",
+            model=getattr(risk_service, "model", "unknown"),
+            usage=usage,
+            reference_id=assessment_id,
+            actor_subject=(metadata or {}).get("requested_by"),
+            factory=session_factory,
+        )
+    except Exception:
+        logger.exception("Could not record usage for assessment %s", assessment_id)
+
+
 async def run_assessment_job(session_factory, assessment_id: UUID) -> str:
     """Run one claimed assessment to completion. Returns the final status."""
 
@@ -301,11 +334,18 @@ async def run_assessment_job(session_factory, assessment_id: UUID) -> str:
             await db.refresh(assessment)
             assessment.status = "completed"
             assessment.completed_at = datetime.now(timezone.utc)
-            assessment.extra_data = {
+            extra = {
                 **(assessment.extra_data or {}),
                 "progress": {"stage": "completed", "message": "Completed"},
                 "duration_seconds": round(time.perf_counter() - started, 1),
             }
+            usage = getattr(risk_service, "token_usage", None)
+            if isinstance(usage, TokenUsage) and usage.requests:
+                extra["llm_usage"] = {
+                    "model": getattr(risk_service, "model", None),
+                    **usage.as_dict(),
+                }
+            assessment.extra_data = extra
             await db.commit()
 
         logger.info(
@@ -313,6 +353,7 @@ async def run_assessment_job(session_factory, assessment_id: UUID) -> str:
             assessment_id,
             time.perf_counter() - started,
         )
+        await record_job_usage(session_factory, assessment_id, risk_service)
         await audit_job(
             session_factory,
             assessment_id,
@@ -343,6 +384,7 @@ async def run_assessment_job(session_factory, assessment_id: UUID) -> str:
             await mark_failed(session_factory, assessment_id, message)
         except Exception:
             logger.exception("Could not mark assessment %s failed", assessment_id)
+        await record_job_usage(session_factory, assessment_id, risk_service)
         await audit_job(
             session_factory,
             assessment_id,

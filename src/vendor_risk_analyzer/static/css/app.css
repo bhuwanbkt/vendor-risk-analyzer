@@ -2423,3 +2423,31 @@ textarea {
     font-size: 13px;
 }
 
+
+
+/* ============================================================
+   AI USAGE (System page)
+   ============================================================ */
+
+.usage-table td:nth-child(n + 3),
+.usage-table tfoot td {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.usage-table thead th:nth-child(n + 3) {
+    text-align: right;
+}
+
+.usage-table tfoot th,
+.usage-table tfoot td {
+    border-top: 1px solid var(--border);
+    color: var(--text);
+    font-weight: 600;
+}
+
+.muted-note {
+    margin-top: 12px;
+    color: var(--text-muted);
+    font-size: 12px;
+}

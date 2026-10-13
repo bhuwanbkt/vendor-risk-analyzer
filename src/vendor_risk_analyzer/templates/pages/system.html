@@ -215,4 +215,87 @@
 
 </section>
 
+<section class="content-card">
+
+    <div class="card-heading">
+
+        <div>
+
+            <h3>
+                AI Usage
+            </h3>
+
+            <p>
+                Gemini tokens used by this company in the last 30 days,
+                including answers that were rejected by grounding checks.
+            </p>
+
+        </div>
+
+    </div>
+
+    {% if usage_summary is none %}
+    <p class="empty-state">
+        Usage tracking is not available yet. Run the latest database migration.
+    </p>
+    {% elif not usage_summary.rows %}
+    <p class="empty-state">
+        No AI usage recorded in the last 30 days.
+    </p>
+    {% else %}
+    <div class="table-wrap">
+        <table class="data-table usage-table">
+            <thead>
+                <tr>
+                    <th scope="col">Feature</th>
+                    <th scope="col">Model</th>
+                    <th scope="col">Model calls</th>
+                    <th scope="col">Input tokens</th>
+                    <th scope="col">Output tokens</th>
+                    <th scope="col">Thinking tokens</th>
+                    {% if usage_summary.priced %}
+                    <th scope="col">Est. cost (USD)</th>
+                    {% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in usage_summary.rows %}
+                <tr>
+                    <td>{{ row.label }}</td>
+                    <td>{{ row.model }}</td>
+                    <td>{{ "{:,}".format(row.usage.requests) }}</td>
+                    <td>{{ "{:,}".format(row.usage.input_tokens) }}</td>
+                    <td>{{ "{:,}".format(row.usage.output_tokens) }}</td>
+                    <td>{{ "{:,}".format(row.usage.thought_tokens) }}</td>
+                    {% if usage_summary.priced %}
+                    <td>{{ "%.4f"|format(row.estimated_cost) }}</td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <th scope="row" colspan="2">Total</th>
+                    <td>{{ "{:,}".format(usage_summary.total.requests) }}</td>
+                    <td>{{ "{:,}".format(usage_summary.total.input_tokens) }}</td>
+                    <td>{{ "{:,}".format(usage_summary.total.output_tokens) }}</td>
+                    <td>{{ "{:,}".format(usage_summary.total.thought_tokens) }}</td>
+                    {% if usage_summary.priced %}
+                    <td>{{ "%.4f"|format(usage_summary.estimated_cost) }}</td>
+                    {% endif %}
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+    {% if not usage_summary.priced %}
+    <p class="muted-note">
+        Set <code>LLM_INPUT_PRICE_PER_MILLION_TOKENS</code> and
+        <code>LLM_OUTPUT_PRICE_PER_MILLION_TOKENS</code> to show an estimated
+        cost at paid rates. The Gemini free tier is not billed.
+    </p>
+    {% endif %}
+    {% endif %}
+
+</section>
+
 {% endblock %}

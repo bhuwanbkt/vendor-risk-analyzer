@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession,
 )
 
+from vendor_risk_analyzer.usage.tokens import TokenUsage
 from vendor_risk_analyzer.retrieval.service import (
     RetrievalResult,
     SemanticRetriever,
@@ -1263,6 +1264,11 @@ RETRIEVED EVIDENCE
             ),
         )
 
+    @property
+    def token_usage(self) -> TokenUsage:
+        """Gemini tokens used by this service instance so far."""
+        return getattr(self, "usage", None) or TokenUsage()
+
     async def _run_llm(
         self,
         *,
@@ -1322,6 +1328,11 @@ RETRIEVED EVIDENCE
             )
 
             raise
+
+        # Count tokens before validating: a rejected answer still cost them.
+        self.usage = self.token_usage + TokenUsage.from_interaction(
+            interaction
+        )
 
         if not interaction.output_text:
             raise RiskAnalysisError(

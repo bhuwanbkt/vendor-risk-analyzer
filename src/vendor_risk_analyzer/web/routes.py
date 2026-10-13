@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 from pathlib import Path
@@ -33,6 +34,7 @@ from sqlalchemy.ext.asyncio import (
 
 from vendor_risk_analyzer.audit.service import ACTION_LABELS, list_events
 from vendor_risk_analyzer.embeddings.worker import worker_status
+from vendor_risk_analyzer.usage.service import summarize_usage
 from vendor_risk_analyzer.auth.dependencies import get_current_user, get_user_roles
 from vendor_risk_analyzer.auth.access import resolve_access
 from vendor_risk_analyzer.db.models import Tenant
@@ -50,6 +52,9 @@ from vendor_risk_analyzer.db.session import (
 from vendor_risk_analyzer.web.navigation import (
     build_navigation,
 )
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 BASE_DIR = (
@@ -933,6 +938,15 @@ async def system_page(
         "worker_detail": worker_status["detail"],
     }
 
+    # Usage tracking is additive: before its migration runs, show a note
+    # instead of failing the page.
+    try:
+        usage_summary = await summarize_usage(db, tenant_id=access.tenant.id)
+    except Exception:
+        logger.exception("AI usage summary unavailable.")
+        await db.rollback()
+        usage_summary = None
+
 
     return templates.TemplateResponse(
         request=request,
@@ -945,6 +959,7 @@ async def system_page(
             active_page="system",
             page_title="System",
             system_info=system_info,
+            usage_summary=usage_summary,
         ),
     )
 
