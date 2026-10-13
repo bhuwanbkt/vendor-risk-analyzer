@@ -38,6 +38,10 @@ different from `ZITADEL_PROJECT_ID`, an application ID, or a client ID.
 Use the organization listed beneath the user's project role grants. The user's
 home organization alone is not permission to access that company's data.
 
+> **Check the ID before writing.** Signed in as an Admin, open `/auth/me`. The
+> Organization ID is the key under `organization_roles`. Do not use `sub`, which
+> is your user ID. Binding the workspace to the wrong ID locks everyone out of it.
+
 The migration places every existing vendor in `Existing workspace`, with its
 documents, chunks, assessments, findings, and IDs unchanged. The workspace is
 locked until an operator explicitly links it to the correct organization.
@@ -66,17 +70,33 @@ default for new members. To start with restricted users, add
 `--default-access assigned` when registering. Admins can always assign access
 after login. New, separate companies default to assigned vendors only.
 
+### Fix a wrong binding
+
+If the existing workspace was registered with the wrong ID (for example a user
+`sub`), correct it directly. The guard on the old value makes the update a no-op
+if anything else changed:
+
+```sql
+UPDATE tenants
+SET zitadel_org_id = '<organization id>', updated_at = NOW()
+WHERE id = '00000000-0000-0000-0000-000000000001'
+  AND zitadel_org_id = '<wrong id>';
+```
+
+Then sign out and sign in again.
+
 ## Northflank rollout order
 
-This release needs migration `2e1d4a7b9c60`. Apply it **before** the new app
-release is deployed. Do not merge a branch that automatically deploys this app
-before the production migration and initial organization binding are complete.
+This is the order used to introduce companies on an existing deployment
+(migration `2e1d4a7b9c60`). A new deployment applies all migrations with
+`alembic upgrade head` and only needs the registration step. For any release
+that includes a migration, run the migration job before the app is deployed.
 
 1. Take a database backup and check the correct ZITADEL Organization ID.
-2. Build the feature branch image for the migration and utility jobs. Keep the
+2. Build the release image for the migration and utility jobs. Keep the
    existing application service on its current image during preparation.
 3. Run the migration job with `alembic upgrade head` using that image and the
-   production database. Check that its revision is `2e1d4a7b9c60`.
+   production database. Check that it reports the latest revision.
 4. Run the existing utility job using the same image and these values:
 
    ```dotenv

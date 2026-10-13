@@ -9,16 +9,19 @@ uv run --python 3.12 --with pytest pytest -q tests/security
 The existing CI workflow collects this suite automatically. Tests send HTTP requests
 through the real FastAPI routes, signed session middleware, role dependencies, CSRF
 checks, and rendered pages. Auth dependencies are never overridden. ORM queries run
-against a seeded in-memory SQLite database with two vendors. Assessment creation,
-ingestion, embeddings, chat, and storage services are mocked at their route boundaries.
-The embedding worker is mocked, and outbound socket connections fail the tests.
+against a seeded in-memory SQLite database with two vendors. Ingestion, embeddings,
+chat, and storage services are mocked at their route boundaries. Assessment creation
+only queues work, so tests check the queued record and that no analysis runs in the
+request. The embedding and assessment workers are mocked, and outbound socket
+connections fail the tests.
 
 | Access | Viewer | Analyst | Admin | No assigned application role |
 | --- | --- | --- | --- | --- |
 | Vendor, document, assessment APIs and data pages | Allowed | Allowed | Allowed | Forbidden |
+| Report export (PDF/Word) | Allowed | Allowed | Allowed | Forbidden |
 | Vendor creation, upload, ingest, assessment creation, chat | Forbidden | Allowed with CSRF | Allowed with CSRF | Forbidden |
-| Chat page | Forbidden | Allowed | Allowed | Forbidden |
-| System page | Forbidden | Forbidden | Allowed | Forbidden |
+| Chat page and own saved conversations | Forbidden | Allowed | Allowed | Forbidden |
+| Company access, audit log, and system pages | Forbidden | Forbidden | Allowed | Forbidden |
 | Own profile and `/auth/me` | Allowed | Allowed | Allowed | Access information page and own identity |
 
 Anonymous API requests return 401; private page requests redirect to login. Missing,
@@ -64,7 +67,16 @@ and explicit vendor context passed to chat. Company tests additionally verify
 organization-specific role grants, company isolation, per-user assignments, Admin
 scope, dashboard totals, disabled memberships, assignment revocation, safe foreign-ID
 denials before cloud work, company switching/CSRF, and operator registration guards.
-SQLite enables foreign keys and rejects cross-company assignments. It does not
+SQLite enables foreign keys and rejects cross-company assignments.
+
+Feature tests cover background assessments (202 queueing, progress polling, worker
+claim, failure messages without provider details, shutdown requeue), report export
+(vendor and company checks, filenames, PDF and Word content), saved chat (each user
+sees only their own conversations, history is loaded from the server and client
+history is ignored), the audit trail (company isolation, HTML escaping, best-effort
+writes that never break the request), atomic ingest claims, upload resume and
+checksum checks, security headers, and the per-user rate limits (429 with
+`Retry-After`). It does not
 validate PostgreSQL/pgvector search. The CI Compose job migrates existing PostgreSQL
 records, verifies tenant constraints, and compares the migrated schema with the ORM.
 The OIDC tests do not exercise ZITADEL's hosted login UI, its browser SSO cookies,

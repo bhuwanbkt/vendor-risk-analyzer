@@ -53,7 +53,9 @@ assessment ID. Every vendor-specific query stays within that vendor.
 
 `ask_vendor` calls the existing evidence-grounded chat service and Gemini; the
 question is limited to 2,000 characters. It does not save a chat history or create
-an assessment. Its tool annotation indicates an external service call and possible
+an assessment. It shares the per-user chat rate limit with the browser chat, and
+each call is recorded in the company's audit log with the question length only,
+never the question text. Its tool annotation indicates an external service call and possible
 different answers on repeated calls. The other five tools only read saved data.
 Chat retries once when a model reply omits citations or cites a source outside
 the retrieved evidence. If the second reply also fails validation, it returns a

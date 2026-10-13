@@ -62,7 +62,7 @@ Write mode:
 OPS_WRITE=true
 ```
 
-### Apply deterministic risk policy
+### Apply the deterministic risk policy
 
 Dry run:
 
@@ -130,7 +130,7 @@ the existing migrated workspace, or leave it false to register a separate empty
 company. `OPS_DEFAULT_ACCESS` optionally chooses `all` or `assigned`.
 It defaults to preview; `OPS_WRITE=true` applies the change.
 
-The new company migration must run before registering or deploying the new app.
-See [Company access rollout](../docs/company-access.md#northflank-rollout-order)
-for the production job order and local uv/Compose commands. Do not create other
-companies until the new app version is deployed.
+Migrations must be applied before registering a company. See
+[Company access](../docs/company-access.md#register-the-initial-company) for
+how to find the Organization ID, fix a wrong binding, and the local uv/Compose
+commands.

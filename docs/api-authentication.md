@@ -59,8 +59,19 @@ invalid token never falls back to the cookie's identity.
 | 503 | Trusted signing keys are unavailable or expired and cannot be refreshed |
 
 Bearer authentication applies to `/api/*` and `/auth/me`. It does not create a
-browser session or authenticate HTML pages. User and tenant vendor ownership is
-not modeled; authorized roles currently have access to all vendors.
+browser session or authenticate HTML pages. Data access follows the selected
+company's membership and vendor-assignment policy (see
+[Company selection](#company-selection)).
+
+Creating an assessment returns `202 Accepted` with the assessment in `queued`
+status. A background worker runs it; poll `GET /api/assessments/{id}` until the
+status is `completed` or `failed`. While it runs, `metadata.progress` holds the
+current stage and message.
+
+Assessment creation and chat are rate limited per user
+(`ASSESSMENT_RATE_LIMIT_PER_HOUR`, default 20, and `CHAT_RATE_LIMIT_PER_MINUTE`,
+default 20). A request over the limit returns `429` with a `Retry-After` header.
+Limits are kept in memory per app process.
 
 ## Verification and limits
 
