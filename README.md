@@ -109,7 +109,10 @@ provides PostgreSQL and MinIO for local development.
 5. **Ground.** Duplicate citations are collapsed, chunk IDs that were not retrieved
    are removed, and findings left without valid evidence are dropped and counted.
    A strict validator then checks the result.
-6. **Consolidate.** Duplicate findings are merged deterministically. The summary is
+6. **Consolidate.** Duplicate findings are merged deterministically: identical
+   findings, an evidence gap and an explicit risk about the same issue, and a
+   contradiction about a stated risk (the risk is kept and notes that the sources
+   disagree), so one issue is not counted twice in the score. The summary is
    rebuilt whenever the finding set changed.
 7. **Save and rate.** Findings are persisted with their evidence, then the policy
    assigns severities, the overall risk, and the score. The assessment becomes
