@@ -682,7 +682,9 @@ built from the same image:
 | Migration | `uv run alembic upgrade head` | Apply schema migrations |
 | Utility | `uv run python scripts/ops/run.py` | `register_tenant`, `apply_risk_policy`, `backfill_embeddings`, `run_eval` (chosen with `OPS_TASK`) |
 
-**Releases that add a migration:** merge, build the migration job from the new
+**Releases that add a migration:** rehearse it on a Neon branch first
+([runbook](docs/operations.md#rehearse-a-migration-on-a-copy-of-production)), then
+merge, build the migration job from the new
 `main`, and run it as soon as the new app deploys. Additive tables (audit, chat)
 fail gracefully until then. For a migration the running app depends on, pause
 continuous deployment, run the migration first, then deploy.
@@ -721,4 +723,5 @@ tracing is off unless `SENTRY_TRACES_SAMPLE_RATE` is raised.
 - [API bearer authentication](docs/api-authentication.md)
 - [MCP tools and client setup](docs/mcp.md)
 - [Operational scripts](scripts/README.md)
+- [Operations runbooks: migration rehearsal and restore drill](docs/operations.md)
 - [Security tests and their limits](tests/security/README.md)
