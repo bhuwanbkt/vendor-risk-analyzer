@@ -803,6 +803,107 @@ RETRIEVED EVIDENCE
             )
         )
 
+    # Words that say a finding is a contradiction, or that appear in
+    # almost every finding, carry no information about the issue itself.
+    _GENERIC_TOKENS = frozenset(
+        {
+            "a", "an", "and", "are", "as", "at", "be", "between", "by",
+            "claim", "claims", "conflict", "conflicting", "contradiction",
+            "contradictory", "contradicts", "discrepancy", "documents",
+            "finding", "findings", "for", "from", "has", "have", "in",
+            "inconsistent", "is", "it", "its", "of", "on", "or", "policy",
+            "questionnaire", "regarding", "response", "sources", "states",
+            "that", "the", "this", "to", "vendor", "was", "were", "while",
+            "with",
+        }
+    )
+
+    @classmethod
+    def _content_overlap(
+        cls,
+        left: str,
+        right: str,
+    ) -> float:
+        """Token overlap that ignores generic and contradiction words."""
+
+        def tokens(value: str) -> set[str]:
+            return {
+                token
+                for token in re.findall(r"[a-z0-9]+", value.lower())
+                if token not in cls._GENERIC_TOKENS
+            }
+
+        left_tokens = tokens(left)
+        right_tokens = tokens(right)
+        if not left_tokens or not right_tokens:
+            return 0.0
+        return len(left_tokens & right_tokens) / min(
+            len(left_tokens), len(right_tokens)
+        )
+
+    def _contradicts_same_risk(
+        self,
+        *,
+        left: RiskSignal,
+        right: RiskSignal,
+    ) -> bool:
+        """
+        Decide whether a contradiction is about the same issue as an
+        explicit risk.
+
+        A common pattern: one document states a risk (two pentest
+        findings are open) and another denies it (no open findings).
+        The model often reports both an explicit_risk and a
+        contradiction, which double-counts one issue in the score.
+
+        Guardrails:
+        - categories must match
+        - exactly one contradiction and one explicit_risk
+        - they must cite at least one identical evidence chunk
+        - titles must overlap after removing generic words, or
+          titles partly and descriptions strongly overlap
+        """
+
+        if left.category != right.category:
+            return False
+
+        if {left.finding_type, right.finding_type} != {
+            "contradiction",
+            "explicit_risk",
+        }:
+            return False
+
+        if not (
+            set(left.evidence_chunk_ids)
+            & set(right.evidence_chunk_ids)
+        ):
+            return False
+
+        title_overlap = self._content_overlap(left.title, right.title)
+        description_overlap = self._content_overlap(
+            left.description, right.description
+        )
+
+        return title_overlap >= 0.50 or (
+            title_overlap >= 0.30 and description_overlap >= 0.50
+        )
+
+    @staticmethod
+    def _merged_contradiction_description(
+        *,
+        risk: RiskSignal,
+        contradiction: RiskSignal,
+    ) -> str:
+        """Keep the contradiction's detail in the surviving risk."""
+
+        description = (
+            f"{risk.description.rstrip()} "
+            f"The sources also disagree: {contradiction.description.strip()}"
+        )
+        if len(description) <= 1200:
+            return description
+        return description[:1196].rsplit(" ", 1)[0].rstrip(" ,;:") + "..."
+
     @staticmethod
     def _normalized_summary(
         *,
@@ -893,8 +994,14 @@ RETRIEVED EVIDENCE
            document, and have sufficient
            deterministic title/description
            overlap.
-        3. Contradictions are never merged
-           with a different finding type.
+        3. A contradiction may be merged into
+           an explicit_risk about the same issue
+           (same category, a shared evidence
+           chunk, and overlapping wording). The
+           explicit_risk is kept and its
+           description notes the disagreement.
+           Contradictions are never merged with
+           any other finding type.
         4. Consolidation preserves the union
            of validated evidence IDs.
         """
@@ -969,6 +1076,13 @@ RETRIEVED EVIDENCE
                     )
                 )
 
+                contradicted_risk = (
+                    self._contradicts_same_risk(
+                        left=existing,
+                        right=finding,
+                    )
+                )
+
                 if (
                     same_category
                     and (
@@ -983,6 +1097,7 @@ RETRIEVED EVIDENCE
                                 or same_root_cause
                             )
                         )
+                        or contradicted_risk
                     )
                 ):
                     duplicate_index = (
@@ -1012,7 +1127,32 @@ RETRIEVED EVIDENCE
                 finding.finding_type,
             }
 
+            description_override: (
+                str | None
+            ) = None
+
             if finding_types == {
+                "contradiction",
+                "explicit_risk",
+            }:
+                if (
+                    finding.finding_type
+                    == "explicit_risk"
+                ):
+                    preferred = finding
+                    contradiction = existing
+                else:
+                    preferred = existing
+                    contradiction = finding
+
+                description_override = (
+                    self._merged_contradiction_description(
+                        risk=preferred,
+                        contradiction=contradiction,
+                    )
+                )
+
+            elif finding_types == {
                 "evidence_gap",
                 "explicit_risk",
             }:
@@ -1057,7 +1197,8 @@ RETRIEVED EVIDENCE
                     preferred.title
                 ),
                 description=(
-                    preferred.description
+                    description_override
+                    or preferred.description
                 ),
                 evidence_chunk_ids=(
                     merged_evidence_ids

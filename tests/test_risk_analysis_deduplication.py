@@ -238,3 +238,156 @@ def test_similar_findings_from_different_documents_stay_separate() -> None:
     )
 
     assert len(result.findings) == 2
+
+
+# ------------------------------------------------------------
+# Contradiction + explicit risk about the same issue
+# ------------------------------------------------------------
+
+PENTEST_RISK = RiskSignal(
+    finding_type="explicit_risk",
+    category="vulnerability_management",
+    title="Unresolved High-Severity Penetration Test Findings Exceed Remediation Timeline",
+    description=(
+        "Two high-severity findings from the November 2025 penetration test, "
+        "an authorization bypass and an outdated web server component, remain "
+        "unresolved beyond the 30-day remediation timeline."
+    ),
+    evidence_chunk_ids=["policy-vuln"],
+    confidence=0.95,
+)
+
+PENTEST_CONTRADICTION = RiskSignal(
+    finding_type="contradiction",
+    category="vulnerability_management",
+    title="Contradictory Claims Regarding Open Penetration Test Findings",
+    description=(
+        "The questionnaire states there are no open high or critical "
+        "penetration test findings, while the security policy states two "
+        "high-severity findings remain unresolved."
+    ),
+    evidence_chunk_ids=["policy-vuln", "questionnaire-vuln"],
+    confidence=0.9,
+)
+
+
+def larkspur_evidence() -> list[RetrievalResult]:
+    return [
+        evidence(chunk_id="policy-vuln", document_id="policy"),
+        evidence(chunk_id="policy-access", document_id="policy"),
+        evidence(chunk_id="questionnaire-vuln", document_id="questionnaire"),
+        evidence(chunk_id="questionnaire-access", document_id="questionnaire"),
+    ]
+
+
+def test_contradiction_merges_into_explicit_risk_on_same_issue() -> None:
+    for order in (
+        [PENTEST_RISK, PENTEST_CONTRADICTION],
+        [PENTEST_CONTRADICTION, PENTEST_RISK],
+    ):
+        result = service().deduplicate_findings(
+            EvidenceAnalysis(summary="Larkspur summary.", findings=order),
+            evidence=larkspur_evidence(),
+        )
+
+        assert len(result.findings) == 1
+        merged = result.findings[0]
+        assert merged.finding_type == "explicit_risk"
+        assert merged.title == PENTEST_RISK.title
+        assert merged.description.startswith(PENTEST_RISK.description)
+        assert "The sources also disagree:" in merged.description
+        assert "no open high or critical" in merged.description
+        assert merged.evidence_chunk_ids == list(
+            dict.fromkeys(
+                [*order[0].evidence_chunk_ids, *order[1].evidence_chunk_ids]
+            )
+        )
+        assert merged.confidence == 0.95
+
+
+def test_contradiction_about_another_control_stays_separate() -> None:
+    # MFA risk and the access-review contradiction cite the same policy
+    # section chunk, but they are different issues.
+    mfa_risk = RiskSignal(
+        finding_type="explicit_risk",
+        category="access_control",
+        title="MFA Not Enforced for 14 Contractor Accounts",
+        description=(
+            "Multi-factor authentication is not enforced for 14 contractor "
+            "accounts that access the customer support console, with no "
+            "committed remediation date."
+        ),
+        evidence_chunk_ids=["policy-access"],
+        confidence=0.95,
+    )
+    review_contradiction = RiskSignal(
+        finding_type="contradiction",
+        category="access_control",
+        title="Inconsistent User Access Review Frequency",
+        description=(
+            "The policy states user access reviews are performed quarterly, "
+            "while the questionnaire states they are performed annually."
+        ),
+        evidence_chunk_ids=["policy-access", "questionnaire-access"],
+        confidence=0.9,
+    )
+
+    result = service().deduplicate_findings(
+        EvidenceAnalysis(
+            summary="Access findings.",
+            findings=[mfa_risk, review_contradiction],
+        ),
+        evidence=larkspur_evidence(),
+    )
+
+    assert [f.finding_type for f in result.findings] == [
+        "explicit_risk",
+        "contradiction",
+    ]
+
+
+def test_contradiction_without_shared_chunk_stays_separate() -> None:
+    contradiction = PENTEST_CONTRADICTION.model_copy(
+        update={"evidence_chunk_ids": ["questionnaire-vuln"]}
+    )
+
+    result = service().deduplicate_findings(
+        EvidenceAnalysis(
+            summary="Separate findings.",
+            findings=[PENTEST_RISK, contradiction],
+        ),
+        evidence=larkspur_evidence(),
+    )
+
+    assert len(result.findings) == 2
+
+
+def test_contradiction_never_merges_with_evidence_gap() -> None:
+    gap = PENTEST_RISK.model_copy(update={"finding_type": "evidence_gap"})
+
+    result = service().deduplicate_findings(
+        EvidenceAnalysis(
+            summary="Separate findings.",
+            findings=[gap, PENTEST_CONTRADICTION],
+        ),
+        evidence=larkspur_evidence(),
+    )
+
+    assert len(result.findings) == 2
+
+
+def test_merged_description_stays_within_schema_limit() -> None:
+    long_risk = PENTEST_RISK.model_copy(
+        update={"description": "Open penetration test findings. " * 35}
+    )
+
+    result = service().deduplicate_findings(
+        EvidenceAnalysis(
+            summary="Long description case.",
+            findings=[long_risk, PENTEST_CONTRADICTION],
+        ),
+        evidence=larkspur_evidence(),
+    )
+
+    assert len(result.findings) == 1
+    assert len(result.findings[0].description) <= 1200
