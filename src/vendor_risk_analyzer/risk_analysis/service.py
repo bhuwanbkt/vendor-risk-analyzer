@@ -431,7 +431,26 @@ GROUNDING RULES
   incomplete, or not provided.
 - An explicit risk may be reported only when the
   source itself describes a risk, finding, issue,
-  weakness, exception, or unresolved condition.
+  weakness, exception, or unresolved condition,
+  or states one of the risky practices listed below.
+
+RISKY PRACTICES STATED AS FACT
+Some risks are written as neutral statements of
+practice. Report these as explicit_risk even when the
+source does not call them a risk:
+- Customer data or files are used to train, fine-tune,
+  or improve the vendor's or a third party's AI models
+  by default, or unless the customer opts out.
+- A required security control, such as multi-factor
+  authentication, is not enforced for some users,
+  accounts, or systems.
+- Customer data is sold to, or shared with, third
+  parties for purposes other than providing the
+  service.
+Do not report optional features, controls described
+as available or customer-configurable, or legacy
+protocols that remain supported until a stated end
+date. Report only practices the evidence states.
 - Do not infer regulatory requirements.
 - Do not invent compliance thresholds.
 - Do not label a strong security control as a risk.
