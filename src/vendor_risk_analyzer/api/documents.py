@@ -34,6 +34,7 @@ from vendor_risk_analyzer.storage.client import (
     generate_upload_url,
     get_object_metadata,
 )
+from vendor_risk_analyzer.embeddings.worker import notify_new_document
 from vendor_risk_analyzer.ingestion.service import (
     ingest_document,
 )
@@ -400,7 +401,7 @@ async def ingest_uploaded_document(
     )
 
     try:
-        return await ingest_document(
+        result = await ingest_document(
             document=document,
             db=db,
         )
@@ -416,3 +417,8 @@ async def ingest_uploaded_document(
             status_code=500,
             detail="Document ingestion failed",
         ) from exc
+
+    # Start embedding now instead of at the worker's next idle poll.
+    notify_new_document()
+
+    return result

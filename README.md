@@ -529,10 +529,18 @@ pip compatibility.
 | `EMBEDDING_WORKER_POLL_SECONDS`, `EMBEDDING_WORKER_STALE_MINUTES` | `10`, `30` | Polling and stale recovery |
 | `ASSESSMENT_WORKER_ENABLED` | `true` | Run the assessment worker |
 | `ASSESSMENT_WORKER_POLL_SECONDS`, `ASSESSMENT_STALE_MINUTES` | `5`, `15` | Polling; when a stuck run is failed |
+| `EMBEDDING_WORKER_IDLE_MAX_SECONDS`, `ASSESSMENT_WORKER_IDLE_MAX_SECONDS` | `600`, `600` | Longest wait between checks of an empty queue (see below) |
 | `ASSESSMENT_RATE_LIMIT_PER_HOUR`, `CHAT_RATE_LIMIT_PER_MINUTE` | `20`, `20` | Per-user limits (`0` disables) |
 
 Keep `RISK_LLM_MODEL` and `EMBEDDING_MODEL` identical on the application and on
 any job that runs analysis or evaluation.
+
+**Idle backoff.** When a worker's queue is empty, the wait between database checks
+doubles from the poll interval up to the idle maximum. Finding work resets it, and
+an upload or a new assessment wakes the worker immediately, so users never wait
+for the backoff. The 10-minute default is longer than Neon's 5-minute idle window,
+so a serverless database can suspend instead of being kept awake by polling. Set
+the maximum equal to the poll interval to turn backoff off.
 
 ## API reference
 

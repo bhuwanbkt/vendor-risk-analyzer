@@ -23,6 +23,11 @@ from vendor_risk_analyzer.embeddings.repository import (
 from vendor_risk_analyzer.db.url import (
     get_database_url,
 )
+from vendor_risk_analyzer.idle_backoff import (
+    IdleBackoff,
+    idle_max_seconds,
+    wait_for_work,
+)
 from vendor_risk_analyzer.embeddings.service import (
     EmbeddingError,
     EmbeddingService,
@@ -33,6 +38,15 @@ from vendor_risk_analyzer.embeddings.service import (
 logger = logging.getLogger(
     "uvicorn.error"
 )
+
+
+# Set after a document is ingested so the worker starts embedding without
+# waiting for its next (possibly backed-off) poll.
+_wake = asyncio.Event()
+
+
+def notify_new_document() -> None:
+    _wake.set()
 
 
 def _get_int_env(
@@ -541,6 +555,12 @@ async def run_embedding_worker() -> None:
         minimum=1,
     )
 
+    idle_max = idle_max_seconds(
+        "EMBEDDING_WORKER_IDLE_MAX_SECONDS",
+        minimum=poll_seconds,
+    )
+    backoff = IdleBackoff(poll_seconds, idle_max)
+
     engine = create_async_engine(
         get_database_url(),
         poolclass=NullPool,
@@ -558,8 +578,10 @@ async def run_embedding_worker() -> None:
         logger.info(
             "Automatic embedding worker "
             "started. poll=%.1fs "
+            "idle_max=%.1fs "
             "batch=%s delay=%.1fs",
             poll_seconds,
+            idle_max,
             batch_size,
             delay_seconds,
         )
@@ -584,6 +606,10 @@ async def run_embedding_worker() -> None:
                             recovered,
                         )
 
+                # Clear before claiming so a notification that arrives
+                # during the claim is not lost.
+                _wake.clear()
+
                 document_id = (
                     await claim_next_document(
                         engine
@@ -591,11 +617,17 @@ async def run_embedding_worker() -> None:
                 )
 
                 if document_id is None:
-                    await asyncio.sleep(
-                        poll_seconds
-                    )
+                    # Back off while idle so the database can suspend;
+                    # an ingest in this process wakes the worker at once.
+                    if await wait_for_work(
+                        _wake,
+                        backoff.next_delay(),
+                    ):
+                        backoff.reset()
 
                     continue
+
+                backoff.reset()
 
                 logger.info(
                     "Claimed document %s "

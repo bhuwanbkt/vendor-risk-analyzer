@@ -35,6 +35,11 @@ from vendor_risk_analyzer.assessments.service import (
 from vendor_risk_analyzer.audit.service import record_event
 from vendor_risk_analyzer.db.models import Assessment, Vendor
 from vendor_risk_analyzer.db.url import get_database_url
+from vendor_risk_analyzer.idle_backoff import (
+    IdleBackoff,
+    idle_max_seconds,
+    wait_for_work,
+)
 from vendor_risk_analyzer.embeddings.service import EmbeddingError, EmbeddingService
 from vendor_risk_analyzer.retrieval.service import SemanticRetriever
 from vendor_risk_analyzer.risk_analysis.service import (
@@ -381,6 +386,10 @@ async def run_assessment_worker() -> None:
 
     poll_seconds = _int_env("ASSESSMENT_WORKER_POLL_SECONDS", 5, 1)
     stale_minutes = _int_env("ASSESSMENT_STALE_MINUTES", 15, 5)
+    idle_max = idle_max_seconds(
+        "ASSESSMENT_WORKER_IDLE_MAX_SECONDS", minimum=poll_seconds
+    )
+    backoff = IdleBackoff(poll_seconds, idle_max)
 
     engine = create_async_engine(
         get_database_url(),
@@ -391,8 +400,10 @@ async def run_assessment_worker() -> None:
     next_recovery_at = time.monotonic()
 
     logger.info(
-        "Background assessment worker started. poll=%ss stale=%smin",
+        "Background assessment worker started. poll=%ss idle_max=%ss "
+        "stale=%smin",
         poll_seconds,
+        idle_max,
         stale_minutes,
     )
 
@@ -415,11 +426,13 @@ async def run_assessment_worker() -> None:
                 assessment_id = await claim_next_assessment(session_factory)
 
                 if assessment_id is None:
-                    try:
-                        await asyncio.wait_for(_wake.wait(), timeout=poll_seconds)
-                    except TimeoutError:
-                        pass
+                    # Back off while idle so the database can suspend;
+                    # a new assessment from this process wakes us at once.
+                    if await wait_for_work(_wake, backoff.next_delay()):
+                        backoff.reset()
                     continue
+
+                backoff.reset()
 
                 logger.info(
                     "Claimed assessment %s for background processing.",
